@@ -75,7 +75,7 @@
     <div class="config-grid">
       <label class="config-label">Direct IP<input id="cfgIp" class="config-input" type="text" value="http://192.168.4.1"></label>
       <label class="config-label">MQTT Broker<input id="cfgBroker" class="config-input" type="text" value="broker.hivemq.com"></label>
-      <label class="config-label" style="grid-column:1/-1">Topic xe (có thể nhập xeBD2A58)<input id="cfgTopic" class="config-input" type="text" value="" placeholder="xeBD2A58"></label>
+      <label class="config-label" style="grid-column:1/-1">Topic xe (có thể nhập xeBD2A58)<input id="cfgTopic" class="config-input" type="text" value="xeBD2A58" placeholder="xeBD2A58"></label>
     </div><button id="connectBtn" class="btn-connect">📡 KẾT NỐI / KIỂM TRA</button>
     <p class="note">Xe cần vào Wi-Fi có Internet để dùng MQTT. Nếu vẫn có thiết bị nối vào Wi-Fi ESP32_CAR, firmware có thể tạm ngừng MQTT; hãy cho laptop và xe cùng dùng Wi-Fi nhà/hotspot. Topic gốc phải khớp <b>topicBase</b> tại <b>http://IP-XE/netinfo</b>. Chỉ báo MQTT đã kết nối broker chưa đủ để kết luận xe online.</p>
      <p id="networkInfo" class="note" aria-live="polite">Đang chờ thông tin mạng và trạng thái xe...</p>
@@ -296,10 +296,38 @@
   const pending=new Map(), encoder=new TextEncoder(), decoder=new TextDecoder();
   const cameraBase=()=>topicBase+'/cam-v1';
   const hex=bytes=>Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+  let serverClockOffset=0, clockCheckedAt=0;
+  let encryptedReplies=0;
+  async function syncCameraClock(){
+    if(clockCheckedAt && performance.now()-clockCheckedAt<60000)return;
+    if(!/^https?:$/.test(location.protocol))return;
+    const began=Date.now();
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),5000);
+    try{
+      const url=new URL(location.href);
+      url.searchParams.set('camera_clock',String(began));
+      const response=await fetch(url,{method:'HEAD',cache:'no-store',signal:controller.signal});
+      const date=Date.parse(response.headers.get('Date') || '');
+      if(!response.ok || !Number.isFinite(date))throw Error('Không đọc được giờ máy chủ.');
+      serverClockOffset=date+500-(began+Date.now())/2;
+      clockCheckedAt=performance.now();
+      logMsg('Đã đồng bộ giờ camera. Độ lệch đồng hồ '+Math.round(serverClockOffset/1000)+' giây.');
+    }catch(error){
+      throw Error('Không đồng bộ được giờ. Bật ngày giờ tự động trên điện thoại rồi tải lại trang.');
+    }finally{clearTimeout(timeout);}
+  }
   async function unlock(){
     if(!client?.connected)throw Error('Bấm KẾT NỐI / KIỂM TRA ở phần cấu hình trước.');
+    await syncCameraClock();
     if(key)return;
-    const input = prompt('Nhập mật khẩu CAMERA_PASSWORD đã nạp vào camera') || '';
+    const input = await new Promise(resolve=>{
+      const box=document.createElement('dialog');
+      box.innerHTML='<form method="dialog"><label>Mật khẩu camera <input type="password" autocomplete="off" autocapitalize="none" spellcheck="false"></label><button value="ok">Xác nhận</button><button value="cancel">Hủy</button></form>';
+      document.body.appendChild(box);
+      box.addEventListener('close',()=>{const value=box.returnValue==='ok'?box.querySelector('input').value:'';box.remove();resolve(value);},{once:true});
+      box.showModal(); box.querySelector('input').focus();
+    });
     if (input.length < 8) throw Error('Mật khẩu camera cần ít nhất 8 ký tự.');
     const keyBytes = /^[a-f0-9]{64}$/i.test(input)
       ? Uint8Array.from(input.match(/../g), value => parseInt(value, 16))
@@ -310,17 +338,21 @@
     if(!client?.connected || !key)throw Error('Camera chưa kết nối.');
     const id=hex(crypto.getRandomValues(new Uint8Array(16)));
     const iv=crypto.getRandomValues(new Uint8Array(12));
-    const body=encoder.encode([id,Date.now(),op,arg].join('\n'));
+    const body=encoder.encode([id,Math.round(Date.now()+serverClockOffset),op,arg].join('\n'));
     const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:encoder.encode('request')},key,body);
     const packet=new Uint8Array(12+cipher.byteLength);
     packet.set(iv);packet.set(new Uint8Array(cipher),12);
+    const repliesBefore=encryptedReplies;
     return new Promise((resolve,reject)=>{
-      const timer=setTimeout(()=>{pending.delete(id);reject(Error('Camera chưa trả lời. Kiểm tra mật khẩu, Wi-Fi và giờ trên điện thoại.'));},3500);
+      const timer=setTimeout(()=>{pending.delete(id);reject(Error(encryptedReplies>repliesBefore
+        ? 'Đã nhận gói camera nhưng chưa đọc được phản hồi của yêu cầu này. Bấm Đổi mật khẩu và nhập lại đúng mật khẩu trên laptop.'
+        : 'Không nhận gói camera. Topic đang dùng: '+cameraBase()+'. So sánh với laptop và đóng camera trên laptop trước khi thử lại.'));},3500);
       pending.set(id,{finish(data){if(onFrame && Number.isInteger(data.frame)){onFrame(data); if(data.frame<5)return;}clearTimeout(timer);pending.delete(id);resolve(data);}});
       if(client.connected)client.publish(cameraBase()+'/request',packet,{qos:0,retain:false});
     });
   }
   async function cameraReply(raw){
+    encryptedReplies++;
     if(!key || !pending.size || raw.length<28 || raw.length>62000)return;
     try{
       const bytes=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:raw.subarray(0,12),additionalData:encoder.encode('reply')},key,raw.subarray(12)));
@@ -374,7 +406,7 @@
             $('camStatus').textContent=img.naturalWidth+' × '+img.naturalHeight+' · Đang xem trực tiếp';
           } catch {} finally {if(imageUrl!==url)URL.revokeObjectURL(url);}
         });
-        if(reply.frame===null)throw Error('Hãy nạp firmware camera đi kèm bản dashboard này.');
+        if(reply.frame===null)throw Error('Camera dùng firmware ảnh đơn. Cần firmware trong Camera_4G_Burst.zip để xem chế độ này.');
       }catch(e){if(epoch===g){$('camStatus').textContent=e.message;await new Promise(r=>setTimeout(r,500));}}
     }
   }
