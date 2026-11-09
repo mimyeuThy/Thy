@@ -397,7 +397,7 @@
 
   function startDrive(command, source, token, button) {
     if (command === 'S') { clearDriveHold(false); publishCmd('drive', 'S'); return; }
-    if ((!camOn || !camLastFrameAt || Date.now() - camLastFrameAt > 2000)) {
+    if (camOn && (!camLastFrameAt || Date.now() - camLastFrameAt > 2000)) {
       $('camStatus').textContent = 'Chưa có hình mới từ camera — chưa cho xe chạy.';
       publishCmd('drive', 'S'); return;
     }
