@@ -356,7 +356,12 @@
     $('camImage').hidden=true;$('camPlaceholder').hidden=false;
     $('camImage').removeAttribute('src');if(imageUrl)URL.revokeObjectURL(imageUrl);imageUrl='';
     $('camStatus').textContent=enable?'Đang chờ ảnh…':'Camera tắt.';
-    while(camOn && epoch===g){
+    let newest = 0;
+    let sequence = 0;
+    async function receiveFrames(initialDelay) {
+      await new Promise(resolve => setTimeout(resolve, initialDelay));
+      while(camOn && epoch===g){
+      const number = ++sequence;
       const start=Date.now();let url='';
       try{
         const {result,jpeg}=await requestCamera('frame',$('remoteSize').value);
@@ -364,17 +369,21 @@
         url=URL.createObjectURL(new Blob([jpeg],{type:'image/jpeg'}));
         const probe=new Image();probe.src=url;await probe.decode();
         if(epoch!==g)return;
+        if(number<=newest)continue;
         const elapsed=Date.now()-start;
         if(elapsed>1900)throw Error('Hình đến chậm. Chọn 160 × 120 để giảm dữ liệu.');
+        newest=number;
         const old=imageUrl;imageUrl=url;url='';
         $('camImage').style.opacity='1';$('camImage').src=imageUrl;$('camImage').hidden=false;$('camPlaceholder').hidden=true;
         if(old)URL.revokeObjectURL(old);
         camLastFrameAt=start;
         $('camStatus').textContent=probe.naturalWidth+' × '+probe.naturalHeight+' · Yêu cầu đến hiển thị '+elapsed+' ms';
-      }catch(e){if(epoch===g){camLastFrameAt=0;clearDriveHold(true);$('camImage').style.opacity='0.4';$('camStatus').textContent=e.message;}}
+      }catch(e){if(epoch===g && number>newest && (!camLastFrameAt || Date.now()-camLastFrameAt>1900)){camLastFrameAt=0;clearDriveHold(true);$('camImage').style.opacity='0.4';$('camStatus').textContent=e.message;}}
       finally{if(url)URL.revokeObjectURL(url);}
-      await new Promise(r=>setTimeout(r,Math.max(0,125-(Date.now()-start))));
+      await new Promise(r=>setTimeout(r,Math.max(0,200-(Date.now()-start))));
     }
+    }
+    await Promise.all([receiveFrames(0), receiveFrames(100)]);
   }
   $('camToggle').onclick=()=>toggleCamera();
   setInterval(() => {
