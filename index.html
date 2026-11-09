@@ -388,27 +388,71 @@
     $('camImage').hidden=true;$('camPlaceholder').hidden=false;
     $('camImage').removeAttribute('src');if(imageUrl)URL.revokeObjectURL(imageUrl);imageUrl='';
     $('camStatus').textContent=enable?'Đang chờ ảnh…':'Camera tắt.';
-    let latest=0, batch=0;
-    while(camOn && epoch===g){
-      const started=Date.now(), base=++batch*6;
-      try {
-        const reply=await requestCamera('burst',$('remoteSize').value,async data=>{
-          const order=base+data.frame;
-          if(epoch!==g || order<=latest || !data.jpeg.length || data.result!=='ok')return;
-          const url=URL.createObjectURL(new Blob([data.jpeg],{type:'image/jpeg'}));
-          try {
-            const img=new Image(); img.src=url; await img.decode();
-            if(epoch!==g || order<=latest || Date.now()-started>1900)return;
-            latest=order; const old=imageUrl; imageUrl=url;
-            $('camImage').src=url; $('camImage').hidden=false; $('camPlaceholder').hidden=true;
-            $('camImage').style.opacity='1'; if(old)URL.revokeObjectURL(old);
-            camLastFrameAt=started;
-            $('camStatus').textContent=img.naturalWidth+' × '+img.naturalHeight+' · Đang xem trực tiếp';
-          } catch {} finally {if(imageUrl!==url)URL.revokeObjectURL(url);}
-        });
-        if(reply.frame===null)throw Error('Camera dùng firmware ảnh đơn. Cần firmware trong Camera_4G_Burst.zip để xem chế độ này.');
-      }catch(e){if(epoch===g){$('camStatus').textContent=e.message;await new Promise(r=>setTimeout(r,500));}}
+    let batch = 0, inFlight = 0, highestReceived = 0;
+    let decoding = false, waiting = null;
+    let shown = 0, windowStart = performance.now();
+    const active = () => camOn && epoch === g;
+    async function drawLatest(){
+      if(decoding)return;
+      decoding = true;
+      try{
+        while(active() && waiting){
+          const frame = waiting;
+          waiting = null;
+          const url = URL.createObjectURL(new Blob([frame.jpeg], {type:'image/jpeg'}));
+          try{
+            const image = new Image();
+            image.src = url;
+            await image.decode();
+            if(!active() || Date.now()-frame.started>1900)continue;
+            const old = imageUrl;
+            imageUrl = url;
+            $('camImage').src = url;
+            $('camImage').hidden = false;
+            $('camPlaceholder').hidden = true;
+            if(old)URL.revokeObjectURL(old);
+            camLastFrameAt = frame.started;
+            shown++;
+            const duration = performance.now()-windowStart;
+            if(duration>=1000){
+              $('camStatus').textContent=image.naturalWidth+' × '+image.naturalHeight+' · '+(shown*1000/duration).toFixed(1)+' hình/giây';
+              shown=0;
+              windowStart=performance.now();
+            }
+          }catch(error){if(active())$('camStatus').textContent='Điện thoại chưa đọc được ảnh JPEG.';}
+          finally{if(imageUrl!==url)URL.revokeObjectURL(url);}
+        }
+      }finally{decoding=false;}
     }
+    async function getBatch(){
+      if(!active() || inFlight>=2)return;
+      inFlight++;
+      const started=Date.now(), base=++batch*6;
+      let requestedNext=false;
+      try{
+        const reply=await requestCamera('burst',$('remoteSize').value,data=>{
+          const order=base+data.frame;
+          if(!active() || order<=highestReceived || !data.jpeg.length || data.result!=='ok')return;
+          highestReceived=order;
+          waiting={jpeg:data.jpeg,started};
+          void drawLatest();
+          if(!requestedNext && data.frame>=3 && data.frame<5 && inFlight===1 && Date.now()-started<1100){
+            requestedNext=true;
+            void getBatch();
+          }
+        });
+        if(reply.frame===null)throw Error('Camera cần firmware hỗ trợ gửi 6 ảnh.');
+      }catch(error){
+        if(active() && inFlight===1){
+          $('camStatus').textContent=error.message;
+          await new Promise(resolve=>setTimeout(resolve,500));
+        }
+      }finally{
+        inFlight--;
+        if(active() && inFlight===0)void getBatch();
+      }
+    }
+    void getBatch();
   }
   $('camToggle').onclick=()=>toggleCamera();
   setInterval(() => {
