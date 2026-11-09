@@ -48,7 +48,7 @@
 
       <button id="camToggle" class="cam-button" type="button">📷 BẬT CAMERA</button>
     </div>
-    <label>Độ phân giải <select id="remoteSize"><option value="160">160 × 120 · Ít trễ</option><option value="320" selected>320 × 240 · Cân bằng</option><option value="640">640 × 480 · Rõ</option></select></label> <button id="forgetKey">Đổi mật khẩu</button> <button id="camCheck" class="cam-button" type="button" style="margin-top:8px">Kiểm tra camera</button>
+    <label>Độ phân giải <select id="remoteSize"><option value="160" selected>160 × 120 · Ít trễ</option><option value="320">320 × 240 · Cân bằng</option><option value="640">640 × 480 · Rõ</option></select></label> <button id="forgetKey">Đổi mật khẩu</button> <button id="camCheck" class="cam-button" type="button" style="margin-top:8px">Kiểm tra camera</button>
     <div><h3>Canh gác và gửi ảnh qua email</h3>
     <button class="cam-button" id="armEmail">Bật canh gác</button>
     <button class="cam-button" id="disarmEmail">Tắt canh gác</button>
@@ -306,7 +306,7 @@
       : new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(input)));
     key = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['encrypt','decrypt']);
   }
-  async function requestCamera(op,arg=''){
+  async function requestCamera(op,arg='',onFrame=null){
     if(!client?.connected || !key)throw Error('Camera chưa kết nối.');
     const id=hex(crypto.getRandomValues(new Uint8Array(16)));
     const iv=crypto.getRandomValues(new Uint8Array(12));
@@ -316,7 +316,7 @@
     packet.set(iv);packet.set(new Uint8Array(cipher),12);
     return new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>{pending.delete(id);reject(Error('Camera chưa trả lời. Kiểm tra mật khẩu, Wi-Fi và giờ trên điện thoại.'));},3500);
-      pending.set(id,{finish(data){clearTimeout(timer);pending.delete(id);resolve(data);}});
+      pending.set(id,{finish(data){if(onFrame && Number.isInteger(data.frame)){onFrame(data); if(data.frame<5)return;}clearTimeout(timer);pending.delete(id);resolve(data);}});
       if(client.connected)client.publish(cameraBase()+'/request',packet,{qos:0,retain:false});
     });
   }
@@ -325,12 +325,12 @@
     try{
       const bytes=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:raw.subarray(0,12),additionalData:encoder.encode('reply')},key,raw.subarray(12)));
       const split=bytes.indexOf(10);if(split<0 || split>127)return;
-      const [id,result,state,last,mail]=decoder.decode(bytes.subarray(0,split)).split('|');
+      const [id,result,state,last,mail,index]=decoder.decode(bytes.subarray(0,split)).split('|');
       if(!pending.has(id))return;
       $('guardStatus').textContent=({on:'Đang canh gác',off:'Đã tắt canh gác',waiting:'Chờ PIR ổn định'}[state]||'')+
         (Number(last)?' · Gửi ảnh gần nhất '+new Date(Number(last)*1000).toLocaleString('vi-VN'):'')+
         (mail==='3'?' · Lần gửi gần nhất lỗi':mail==='1'?' · Đang gửi ảnh':'');
-      pending.get(id).finish({result,jpeg:bytes.subarray(split+1)});
+      pending.get(id).finish({result,frame:index===undefined?null:Number(index),jpeg:bytes.subarray(split+1)});
     }catch{/* Only authenticated replies can complete a request. */}
   }
   async function guard(mode){
@@ -356,34 +356,27 @@
     $('camImage').hidden=true;$('camPlaceholder').hidden=false;
     $('camImage').removeAttribute('src');if(imageUrl)URL.revokeObjectURL(imageUrl);imageUrl='';
     $('camStatus').textContent=enable?'Đang chờ ảnh…':'Camera tắt.';
-    let newest = 0;
-    let sequence = 0;
-    async function receiveFrames(initialDelay) {
-      await new Promise(resolve => setTimeout(resolve, initialDelay));
-      while(camOn && epoch===g){
-      const number = ++sequence;
-      const start=Date.now();let url='';
-      try{
-        const {result,jpeg}=await requestCamera('frame',$('remoteSize').value);
-        if(result!=='ok' || !jpeg.length)throw Error('Camera bận. Chọn 160 × 120 để giảm dữ liệu.');
-        url=URL.createObjectURL(new Blob([jpeg],{type:'image/jpeg'}));
-        const probe=new Image();probe.src=url;await probe.decode();
-        if(epoch!==g)return;
-        if(number<=newest)continue;
-        const elapsed=Date.now()-start;
-        if(elapsed>1900)throw Error('Hình đến chậm. Chọn 160 × 120 để giảm dữ liệu.');
-        newest=number;
-        const old=imageUrl;imageUrl=url;url='';
-        $('camImage').style.opacity='1';$('camImage').src=imageUrl;$('camImage').hidden=false;$('camPlaceholder').hidden=true;
-        if(old)URL.revokeObjectURL(old);
-        camLastFrameAt=start;
-        $('camStatus').textContent=probe.naturalWidth+' × '+probe.naturalHeight+' · Yêu cầu đến hiển thị '+elapsed+' ms';
-      }catch(e){if(epoch===g && number>newest && (!camLastFrameAt || Date.now()-camLastFrameAt>1900)){camLastFrameAt=0;clearDriveHold(true);$('camImage').style.opacity='0.4';$('camStatus').textContent=e.message;}}
-      finally{if(url)URL.revokeObjectURL(url);}
-      await new Promise(r=>setTimeout(r,Math.max(0,200-(Date.now()-start))));
+    let latest=0, batch=0;
+    while(camOn && epoch===g){
+      const started=Date.now(), base=++batch*6;
+      try {
+        const reply=await requestCamera('burst',$('remoteSize').value,async data=>{
+          const order=base+data.frame;
+          if(epoch!==g || order<=latest || !data.jpeg.length || data.result!=='ok')return;
+          const url=URL.createObjectURL(new Blob([data.jpeg],{type:'image/jpeg'}));
+          try {
+            const img=new Image(); img.src=url; await img.decode();
+            if(epoch!==g || order<=latest || Date.now()-started>1900)return;
+            latest=order; const old=imageUrl; imageUrl=url;
+            $('camImage').src=url; $('camImage').hidden=false; $('camPlaceholder').hidden=true;
+            $('camImage').style.opacity='1'; if(old)URL.revokeObjectURL(old);
+            camLastFrameAt=started;
+            $('camStatus').textContent=img.naturalWidth+' × '+img.naturalHeight+' · Đang xem trực tiếp';
+          } catch {} finally {if(imageUrl!==url)URL.revokeObjectURL(url);}
+        });
+        if(reply.frame===null)throw Error('Hãy nạp firmware camera đi kèm bản dashboard này.');
+      }catch(e){if(epoch===g){$('camStatus').textContent=e.message;await new Promise(r=>setTimeout(r,500));}}
     }
-    }
-    await Promise.all([receiveFrames(0), receiveFrames(100)]);
   }
   $('camToggle').onclick=()=>toggleCamera();
   setInterval(() => {
