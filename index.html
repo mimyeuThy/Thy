@@ -48,7 +48,7 @@
 
       <button id="camToggle" class="cam-button" type="button">📷 BẬT CAMERA</button>
     </div>
-    <label>Độ phân giải <select id="remoteSize"><option value="320">320 × 240 · Mượt</option><option value="640">640 × 480 · Rõ</option></select></label> <button id="forgetKey">Quên khóa</button> <button id="camCheck" class="cam-button" type="button" style="margin-top:8px">Kiểm tra camera</button>
+    <label>Độ phân giải <select id="remoteSize"><option value="160">160 × 120 · Ít trễ</option><option value="320" selected>320 × 240 · Cân bằng</option><option value="640">640 × 480 · Rõ</option></select></label> <button id="forgetKey">Đổi mật khẩu</button> <button id="camCheck" class="cam-button" type="button" style="margin-top:8px">Kiểm tra camera</button>
     <div><h3>Canh gác và gửi ảnh qua email</h3>
     <button class="cam-button" id="armEmail">Bật canh gác</button>
     <button class="cam-button" id="disarmEmail">Tắt canh gác</button>
@@ -75,7 +75,7 @@
     <div class="config-grid">
       <label class="config-label">Direct IP<input id="cfgIp" class="config-input" type="text" value="http://192.168.4.1"></label>
       <label class="config-label">MQTT Broker<input id="cfgBroker" class="config-input" type="text" value="broker.hivemq.com"></label>
-      <label class="config-label" style="grid-column:1/-1">Topic gốc (pbl3/ + Device ID)<input id="cfgTopic" class="config-input" type="text" value="" placeholder="Nhập topic gốc của xe"></label>
+      <label class="config-label" style="grid-column:1/-1">Topic xe (có thể nhập xeBD2A58)<input id="cfgTopic" class="config-input" type="text" value="" placeholder="xeBD2A58"></label>
     </div><button id="connectBtn" class="btn-connect">📡 KẾT NỐI / KIỂM TRA</button>
     <p class="note">Xe cần vào Wi-Fi có Internet để dùng MQTT. Nếu vẫn có thiết bị nối vào Wi-Fi ESP32_CAR, firmware có thể tạm ngừng MQTT; hãy cho laptop và xe cùng dùng Wi-Fi nhà/hotspot. Topic gốc phải khớp <b>topicBase</b> tại <b>http://IP-XE/netinfo</b>. Chỉ báo MQTT đã kết nối broker chưa đủ để kết luận xe online.</p>
      <p id="networkInfo" class="note" aria-live="polite">Đang chờ thông tin mạng và trạng thái xe...</p>
@@ -299,9 +299,12 @@
   async function unlock(){
     if(!client?.connected)throw Error('Bấm KẾT NỐI / KIỂM TRA ở phần cấu hình trước.');
     if(key)return;
-    const input=(prompt('Nhập khóa camera 64 ký tự đã nạp vào ESP32-CAM')||'').trim();
-    if(!/^[a-f0-9]{64}$/i.test(input))throw Error('Khóa camera cần 64 ký tự hex.');
-    key=await crypto.subtle.importKey('raw',Uint8Array.from(input.match(/../g),v=>parseInt(v,16)),'AES-GCM',false,['encrypt','decrypt']);
+    const input = prompt('Nhập mật khẩu CAMERA_PASSWORD đã nạp vào camera') || '';
+    if (input.length < 8) throw Error('Mật khẩu camera cần ít nhất 8 ký tự.');
+    const keyBytes = /^[a-f0-9]{64}$/i.test(input)
+      ? Uint8Array.from(input.match(/../g), value => parseInt(value, 16))
+      : new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(input)));
+    key = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['encrypt','decrypt']);
   }
   async function requestCamera(op,arg=''){
     if(!client?.connected || !key)throw Error('Camera chưa kết nối.');
@@ -312,7 +315,7 @@
     const packet=new Uint8Array(12+cipher.byteLength);
     packet.set(iv);packet.set(new Uint8Array(cipher),12);
     return new Promise((resolve,reject)=>{
-      const timer=setTimeout(()=>{pending.delete(id);reject(Error('Camera chưa trả lời. Kiểm tra khóa, Wi-Fi và giờ trên điện thoại.'));},3500);
+      const timer=setTimeout(()=>{pending.delete(id);reject(Error('Camera chưa trả lời. Kiểm tra mật khẩu, Wi-Fi và giờ trên điện thoại.'));},3500);
       pending.set(id,{finish(data){clearTimeout(timer);pending.delete(id);resolve(data);}});
       if(client.connected)client.publish(cameraBase()+'/request',packet,{qos:0,retain:false});
     });
@@ -333,7 +336,7 @@
   async function guard(mode){
     try{
       await unlock();
-      const pin=prompt('Nhập GUARD_PIN');if(!pin)return;
+      const pin=prompt('Nhập mã canh gác GUARD_PIN (từ 4 ký tự)');if(!pin)return;
       const d=await requestCamera(mode,pin);
       $('guardReply').textContent=d.result==='ok'?'Camera đã xác nhận.':'Kiểm tra lại GUARD_PIN.';
     }catch(e){$('guardReply').textContent=e.message;}
@@ -343,7 +346,7 @@
     try{await unlock();await requestCamera('status');$('camDiagnostic').textContent='Camera đã trả lời.';}
     catch(e){$('camDiagnostic').textContent=e.message;}
   };
-  $('forgetKey').onclick=()=>{toggleCamera(false);key=null;$('camDiagnostic').textContent='Đã quên khóa.';};
+  $('forgetKey').onclick=()=>{toggleCamera(false);key=null;$('camDiagnostic').textContent='Đã xóa mật khẩu khỏi tab này.';};
   async function toggleCamera(force){
     const enable=typeof force==='boolean'?force:!camOn;
     if(enable){try{await unlock();}catch(e){$('camStatus').textContent=e.message;return;}}
@@ -357,20 +360,20 @@
       const start=Date.now();let url='';
       try{
         const {result,jpeg}=await requestCamera('frame',$('remoteSize').value);
-        if(result!=='ok' || !jpeg.length)throw Error('Camera bận. Thử 320 × 240.');
+        if(result!=='ok' || !jpeg.length)throw Error('Camera bận. Chọn 160 × 120 để giảm dữ liệu.');
         url=URL.createObjectURL(new Blob([jpeg],{type:'image/jpeg'}));
         const probe=new Image();probe.src=url;await probe.decode();
         if(epoch!==g)return;
         const elapsed=Date.now()-start;
-        if(elapsed>1900)throw Error('Hình đến chậm. Thử 320 × 240.');
+        if(elapsed>1900)throw Error('Hình đến chậm. Chọn 160 × 120 để giảm dữ liệu.');
         const old=imageUrl;imageUrl=url;url='';
-        $('camImage').src=imageUrl;$('camImage').hidden=false;$('camPlaceholder').hidden=true;
+        $('camImage').style.opacity='1';$('camImage').src=imageUrl;$('camImage').hidden=false;$('camPlaceholder').hidden=true;
         if(old)URL.revokeObjectURL(old);
         camLastFrameAt=start;
         $('camStatus').textContent=probe.naturalWidth+' × '+probe.naturalHeight+' · Yêu cầu đến hiển thị '+elapsed+' ms';
-      }catch(e){if(epoch===g){camLastFrameAt=0;clearDriveHold(true);$('camImage').hidden=true;$('camStatus').textContent=e.message;}}
+      }catch(e){if(epoch===g){camLastFrameAt=0;clearDriveHold(true);$('camImage').style.opacity='0.4';$('camStatus').textContent=e.message;}}
       finally{if(url)URL.revokeObjectURL(url);}
-      await new Promise(r=>setTimeout(r,Math.max(0,350-(Date.now()-start))));
+      await new Promise(r=>setTimeout(r,Math.max(0,125-(Date.now()-start))));
     }
   }
   $('camToggle').onclick=()=>toggleCamera();
