@@ -85,11 +85,14 @@
     </details>
   </div>
   <div class="config-card"><div class="card-header">Âm thanh trên xe</div>
-    <label class="config-label">Khóa âm thanh của xe<input id="audioKey" class="config-input" type="password" autocomplete="off" spellcheck="false"></label>
+    <label class="config-label">Mã âm thanh xe · 8 ký tự hoặc khóa cũ<input id="audioKey" maxlength="32" autocapitalize="characters" class="config-input" type="password" autocomplete="off" spellcheck="false"></label>
     <button class="cam-button" id="listenCar">Nghe từ xe / Dừng</button>
     <button class="cam-button" id="audioPermission">Cho phép micro điện thoại</button>
     <button class="cam-button" id="talkCar" style="touch-action:none;user-select:none">Giữ để nói</button>
-    <label class="config-label">Mức giọng phát ở loa xe<input id="speakerLevel" type="range" min="10" max="200" value="100"></label>
+    <label class="config-label">Mức giọng phát ở loa xe<input id="speakerLevel" type="range" min="10" max="200" value="70"></label>
+    <label class="config-label">Độ nhạy micro xe<select id="micLevel" class="config-input">
+      <option value="1">Thấp · giảm rè</option><option value="2">Vừa</option><option value="3">Cao</option>
+    </select></label>
     <p class="note" role="status" id="audioStatus">Dừng xe rồi chọn nghe hoặc nói.</p>
   </div>
   <div class="config-card"><div class="card-header">⚙️ CẤU HÌNH KẾT NỐI</div><p class="note" style="margin:0 0 8px">Trang mở từ IP của ESP32 sẽ tự dùng Direct IP (cùng Wi-Fi). Nếu mở file này riêng trên laptop hoặc từ website khác, trang dùng MQTT qua Internet.</p>
@@ -103,18 +106,76 @@
   </div>
 </div></div>
 <script type="text/plain" id="audio-worklet">
-class Voice extends AudioWorkletProcessor {
-  constructor(){super(); this.chunk=new Int16Array(512); this.used=0;}
-  process(inputs){
-    const input=inputs[0]?.[0];
-    if(input)for(const value of input){
-      this.chunk[this.used++]=Math.round(Math.max(-1,Math.min(1,value))*32767);
-      if(this.used===512){this.port.postMessage(this.chunk.buffer,[this.chunk.buffer]);this.chunk=new Int16Array(512);this.used=0;}
+class CarSound extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    this.mode=options.processorOptions.mode;
+    this.chunk=new Int16Array(512);this.used=0;
+    this.sum=0;this.weight=0;this.ratio=sampleRate/16000;
+    this.queue=[];this.offset=0;this.total=0;this.playing=false;
+    this.phase=0;this.current=0;this.following=0;this.level=0;this.last=0;
+    this.port.onmessage=({data})=>{
+      if(this.mode==='T')return;
+      const pcm=new Int16Array(data);
+      this.queue.push(pcm);this.total+=pcm.length;
+      if(this.total>4096) {
+        this.queue=[pcm];this.offset=0;this.total=pcm.length;
+        this.playing=false;this.phase=0;this.level=0;this.last=0;
+      }
+    };
+  }
+  take() {
+    if(!this.total)return null;
+    const head=this.queue[0],v=head[this.offset++]/32768;
+    --this.total;
+    if(this.offset===head.length){this.queue.shift();this.offset=0;}
+    return v;
+  }
+  process(inputs,outputs) {
+    if(this.mode==='T') {
+      const input=inputs[0]?.[0];
+      if(input)for(const value of input) {
+        let left=1;
+        while(left>0.000001) {
+          const part=Math.min(left,this.ratio-this.weight);
+          this.sum+=value*part;this.weight+=part;left-=part;
+          if(this.weight>=this.ratio-0.000001) {
+            this.chunk[this.used++]=Math.round(Math.max(-1,Math.min(1,this.sum/this.ratio))*32767);
+            this.sum=this.weight=0;
+            if(this.used===512) {
+              this.port.postMessage(this.chunk.buffer,[this.chunk.buffer]);
+              this.chunk=new Int16Array(512);this.used=0;
+            }
+          }
+        }
+      }
+      return true;
+    }
+    const out=outputs[0]?.[0];
+    if(!out)return true;
+    if(!this.playing && this.total>=1536) {
+      this.current=this.take();this.following=this.take();
+      this.phase=0;this.playing=true;
+    }
+    for(let i=0;i<out.length;i++) {
+      if(this.playing) {
+        const v=this.current+(this.following-this.current)*this.phase;
+        this.level+=(1-this.level)*0.012;
+        out[i]=v*this.level;this.last=out[i];
+        this.phase+=16000/sampleRate;
+        while(this.phase>=1 && this.playing) {
+          this.phase-=1;
+          this.current=this.following;
+          const next=this.take();
+          if(next===null){this.playing=false;this.level=0;}
+          else this.following=next;
+        }
+      } else {this.last*=0.99;out[i]=this.last;}
     }
     return true;
   }
 }
-registerProcessor('car-voice',Voice);
+registerProcessor('car-sound',CarSound);
 </script>
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script>
@@ -657,6 +718,7 @@ registerProcessor('car-voice',Voice);
     logMsg('ĐÃ GỬI YÊU CẦU DỪNG KHẨN CẤP (cần xác nhận xe đã dừng).');
   });
   let audioSession = null;
+  let talkHeld=false;
   const audioText = s => { $('audioStatus').textContent = s; };
   const enc = new TextEncoder();
   async function audioSend(s, kind, samples) {
@@ -673,14 +735,16 @@ registerProcessor('car-voice',Voice);
     packet.set(iv); packet.set(new Uint8Array(body), 12);
     s.client.publish(s.base+'/down', packet, {qos:0,retain:false});
   }
-  function stopAudio(msg='Đã dừng âm thanh.') {
+  async function stopAudio(msg='Đã dừng âm thanh.') {
     const s = audioSession;
     if (!s) return;
     audioSession=null;
     clearInterval(s.timer);
-    if (s.confirmed) audioSend(s,'S').catch(()=>{});
+    const stopped=s.confirmed ? audioSend(s,'S').catch(()=>{}) : Promise.resolve();
     if (s.stream) s.stream.getTracks().forEach(t=>t.stop());
-    if (s.ctx) s.ctx.close().catch(()=>{});
+    if(s.node)s.node.disconnect();
+    if(s.ctx)await s.ctx.close().catch(()=>{});
+    await stopped;
     audioText(msg);
   }
   async function micPermission() {
@@ -691,36 +755,53 @@ registerProcessor('car-voice',Voice);
     } catch (_) {audioText('Mở dashboard bằng HTTPS và cho phép Chrome dùng micro.');}
   }
   async function beginAudio(mode) {
-    if (audioSession) {stopAudio(); if (mode==='L') return;}
+    if (audioSession) {await stopAudio(); if (mode==='L') return;}
+    if(mode==='T' && !talkHeld)return;
     if (!client?.connected || !lastVehicleOnline || remoteAllowed===false) {
       audioText('Kết nối MQTT và bật điều khiển từ xa trên xe trước.'); return;
     }
-    const hex=$('audioKey').value.trim();
-    if (!/^[a-f0-9]{32}$/i.test(hex)) {audioText('Nhập 32 ký tự AUDIO_KEY từ Serial Monitor của xe.');return;}
+    const code=$('audioKey').value.trim().toUpperCase();
+    if (!(/^[A-HJ-NP-Z2-9]{8}$/.test(code) || /^[a-f0-9]{32}$/i.test(code))) {audioText('Nhập 8 ký tự AUDIO_CODE từ Serial Monitor của xe.');return;}
     if (!window.isSecureContext || !crypto.subtle) {audioText('Mở dashboard bằng đường dẫn HTTPS.'); return;}
     const s={mode,client,base:topicBase+'/audio-v1',phone:crypto.getRandomValues(new Uint8Array(8)),
       token:new Uint8Array(8),seq:0,rx:0,last:performance.now(),next:0,confirmed:false,started:false};
     audioSession=s;
     try {
-      s.ctx=new AudioContext({sampleRate:16000});
+      s.ctx=new AudioContext({latencyHint:"interactive"});
       await s.ctx.resume();
-      s.key=await crypto.subtle.importKey('raw',Uint8Array.from(hex.match(/../g),v=>parseInt(v,16)),'AES-GCM',false,['encrypt','decrypt']);
+      if(code.length===32) {
+        s.key=await crypto.subtle.importKey('raw',Uint8Array.from(code.match(/../g),v=>parseInt(v,16)),'AES-GCM',false,['encrypt','decrypt']);
+      } else {
+      const material = await crypto.subtle.importKey('raw', enc.encode(code), 'PBKDF2', false, ['deriveKey']);
+      const salt = new Uint8Array([198, 240, 95, 1, 113, 49, 128, 241, 212, 221, 97, 80, 222, 123, 239, 108]);
+      s.key = await crypto.subtle.deriveKey({name:'PBKDF2', hash:'SHA-256', iterations:310000, salt},
+        material, {name:'AES-GCM', length:128}, false, ['encrypt','decrypt']);
+      }
+      const url=URL.createObjectURL(new Blob([$('audio-worklet').textContent],{type:'text/javascript'}));
+      try {await s.ctx.audioWorklet.addModule(url);} finally {URL.revokeObjectURL(url);}
+      if(audioSession!==s)return;
+      s.node=new AudioWorkletNode(s.ctx,'car-sound',{processorOptions:{mode},outputChannelCount:[1]});
+      if(mode==='L')s.node.connect(s.ctx.destination);
+
       if (audioSession!==s) return;
       if (mode==='T') {
-        s.stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true}});
+        s.stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
         if (audioSession!==s) {s.stream.getTracks().forEach(t=>t.stop());return;}
-        const url=URL.createObjectURL(new Blob([$('audio-worklet').textContent],{type:'text/javascript'}));
-        try {await s.ctx.audioWorklet.addModule(url);} finally {URL.revokeObjectURL(url);}
-        if (audioSession!==s) return;
         const source=s.ctx.createMediaStreamSource(s.stream);
-        const node=new AudioWorkletNode(s.ctx,'car-voice');
-        const silent=s.ctx.createGain(); silent.gain.value=0;
-        source.connect(node).connect(silent).connect(s.ctx.destination);
+        const highpass=s.ctx.createBiquadFilter();
+        highpass.type='highpass';highpass.frequency.value=110;
+        const node=s.node;
+        const silent=s.ctx.createGain();silent.gain.value=0;
+        source.connect(highpass).connect(node).connect(silent).connect(s.ctx.destination);
         node.port.onmessage=({data})=>{
           if (audioSession!==s || !s.started || s.sending) return;
           s.sending=true;
           const pcm=new Int16Array(data), gain=Number($('speakerLevel').value)/100;
-          for(let i=0;i<pcm.length;i++) pcm[i]=Math.max(-32768,Math.min(32767,Math.round(pcm[i]*gain)));
+          for(let i=0;i<pcm.length;i++) {
+            const sample=pcm[i]*gain/32768, peak=Math.abs(sample);
+            const limited=peak<=0.8 ? peak : 0.8+0.2*Math.tanh((peak-0.8)/0.2);
+            pcm[i]=Math.round(Math.sign(sample)*limited*32767);
+          }
           audioSend(s,'V',data).catch(()=>{if(audioSession===s)stopAudio('Lỗi gửi tiếng.');}).finally(()=>s.sending=false);
         };
       }
@@ -738,7 +819,12 @@ registerProcessor('car-voice',Voice);
       await audioSend(s,'H');
     } catch(e) {if(audioSession===s)stopAudio('Lỗi âm thanh: '+e.message);}
   }
-  async function receiveAudio(payload) {
+  let audioReceiveChain=Promise.resolve();
+  function receiveAudio(payload) {
+    const active=audioSession;
+    audioReceiveChain=audioReceiveChain.then(()=>{if(audioSession===active)return receiveAudioFrame(payload);}).catch(()=>{});
+  }
+  async function receiveAudioFrame(payload) {
     const s=audioSession;
     if (!s?.key || payload.length<49 || payload.length>1073) return;
     try {
@@ -750,27 +836,25 @@ registerProcessor('car-voice',Voice);
       if (seq<=s.rx) return;
       if(k==='C' && !s.confirmed) {
         s.rx=seq; s.token=raw.slice(9,17); s.confirmed=true; s.last=performance.now();
+        await audioSend(s,$('micLevel').value);
         await audioSend(s,s.mode);return;
       }
       if(!s.confirmed || !s.token.every((b,i)=>b===raw[i+9])) return;
       s.rx=seq; s.last=performance.now();
       if(!s.started) {s.started=true;audioText(s.mode==='T'?'Đang nói. Thả nút để dừng.':'Đang nghe từ xe. Bấm lại để dừng.');}
       if(k!=='A' || s.mode!=='L' || raw.length!==1045) return;
-      const now=s.ctx.currentTime;
-      if(s.next>now+0.24) return;
-      const buf=s.ctx.createBuffer(1,512,16000), out=buf.getChannelData(0);
-      for(let i=0;i<512;i++)out[i]=view.getInt16(21+i*2,true)/32768;
-      const src=s.ctx.createBufferSource();src.buffer=buf;src.connect(s.ctx.destination);
-      const at=s.next>now?s.next:now+0.065;src.start(at);s.next=at+buf.duration;
+      s.node.port.postMessage(raw.slice(21).buffer);
+
     } catch (_) { /* Ignore unauthenticated or obsolete frames. */ }
   }
+  $('micLevel').onchange=()=>{if(audioSession?.confirmed)audioSend(audioSession,$('micLevel').value).catch(()=>{});};
   $('audioPermission').onclick=micPermission;
   $('listenCar').onclick=()=>beginAudio('L');
   const talkButton=$('talkCar');
   talkButton.oncontextmenu=e=>e.preventDefault();
-  talkButton.onpointerdown=e=>{if(!e.isPrimary||e.button!==0)return;e.preventDefault();talkButton.setPointerCapture(e.pointerId);beginAudio('T');};
-  for(const ev of ['pointerup','pointercancel','lostpointercapture'])talkButton.addEventListener(ev,()=>{if(audioSession?.mode==='T')stopAudio();});
-  document.addEventListener('visibilitychange',()=>{if(document.hidden)stopAudio();});
+  talkButton.onpointerdown=e=>{if(!e.isPrimary||e.button!==0)return;e.preventDefault();talkHeld=true;talkButton.setPointerCapture(e.pointerId);beginAudio('T');};
+  for(const ev of ['pointerup','pointercancel','lostpointercapture'])talkButton.addEventListener(ev,()=>{talkHeld=false;if(audioSession?.mode==='T')stopAudio();});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden){talkHeld=false;stopAudio();}});
   window.addEventListener('pagehide',()=>stopAudio());
 
   async function connectMqtt() {
