@@ -71,6 +71,27 @@
     <div class="tele-card"><div class="label">TÍN HIỆU WI-FI</div><div id="vRssi" class="val">-- dBm</div></div>
     <div class="tele-card"><div class="label">TRẠNG THÁI XE</div><div id="vStatus" class="val" style="color:var(--yellow-neon);font-size:12px">Đang chờ...</div></div>
   </div><div id="logConsole" class="console-log">[SYSTEM] ESP32 CAR PRO Dashboard Camera + Control • v1.8.0 MJPEG sẵn sàng.</div></div>
+  <div class="card">
+    <div class="card-header">GIÁM SÁT HỆ THỐNG</div>
+    <p id="iotVehicle">Xe — chưa nhận dữ liệu</p>
+    <p id="iotCamera">Camera — chưa xác nhận kết nối</p>
+    <p id="iotMail">Email — chưa đọc trạng thái</p>
+    <button id="saveSnapshot" class="cam-button" type="button">Lưu ảnh đang xem</button>
+    <p id="snapshotResult" role="status"></p>
+    <details><summary>Nhật ký trên thiết bị này</summary>
+      <p>Nhật ký ghi khi trang đang mở, tối đa 100 mục cho mỗi topic xe.</p>
+      <button id="exportJournal" type="button">Tải nhật ký JSON</button>
+      <ol id="iotJournal"></ol>
+    </details>
+  </div>
+  <div class="config-card"><div class="card-header">Âm thanh trên xe</div>
+    <label class="config-label">Khóa âm thanh của xe<input id="audioKey" class="config-input" type="password" autocomplete="off" spellcheck="false"></label>
+    <button class="cam-button" id="listenCar">Nghe từ xe / Dừng</button>
+    <button class="cam-button" id="audioPermission">Cho phép micro điện thoại</button>
+    <button class="cam-button" id="talkCar" style="touch-action:none;user-select:none">Giữ để nói</button>
+    <label class="config-label">Mức giọng phát ở loa xe<input id="speakerLevel" type="range" min="10" max="200" value="100"></label>
+    <p class="note" role="status" id="audioStatus">Dừng xe rồi chọn nghe hoặc nói.</p>
+  </div>
   <div class="config-card"><div class="card-header">⚙️ CẤU HÌNH KẾT NỐI</div><p class="note" style="margin:0 0 8px">Trang mở từ IP của ESP32 sẽ tự dùng Direct IP (cùng Wi-Fi). Nếu mở file này riêng trên laptop hoặc từ website khác, trang dùng MQTT qua Internet.</p>
     <div class="config-grid">
       <label class="config-label">Direct IP<input id="cfgIp" class="config-input" type="text" value="http://192.168.4.1"></label>
@@ -81,6 +102,20 @@
      <p id="networkInfo" class="note" aria-live="polite">Đang chờ thông tin mạng và trạng thái xe...</p>
   </div>
 </div></div>
+<script type="text/plain" id="audio-worklet">
+class Voice extends AudioWorkletProcessor {
+  constructor(){super(); this.chunk=new Int16Array(512); this.used=0;}
+  process(inputs){
+    const input=inputs[0]?.[0];
+    if(input)for(const value of input){
+      this.chunk[this.used++]=Math.round(Math.max(-1,Math.min(1,value))*32767);
+      if(this.used===512){this.port.postMessage(this.chunk.buffer,[this.chunk.buffer]);this.chunk=new Int16Array(512);this.used=0;}
+    }
+    return true;
+  }
+}
+registerProcessor('car-voice',Voice);
+</script>
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script>
 (() => {
@@ -109,6 +144,94 @@
   let autoTuneSentAt = 0;
   const TELEMETRY_TIMEOUT_MS = 5000;
   const DRIVE_HEARTBEAT_MS = 180; // nhỏ hơn DEADMAN_MS=600 trong firmware
+
+  const journalPrefix = 'car-iot-events-v1:';
+  let journalTopic = '', journal = [];
+  let cameraSeenAt = 0, vehicleSeenAt = 0;
+  let observedGuard = null, observedMail = null, observedSent = null;
+  let cameraPollBusy = false, observedVehicleOnline = null;
+
+  function renderJournal(){
+    const list=$('iotJournal');
+    list.replaceChildren();
+    for(const entry of journal.slice(-15).reverse()){
+      const item=document.createElement('li');
+      item.textContent=new Date(entry.at).toLocaleString('vi-VN')+' — '+entry.message;
+      list.appendChild(item);
+    }
+  }
+  function selectJournal(){
+    const topic=baseTopic();
+    if(journalTopic===topic)return;
+    journalTopic=topic; journal=[];
+    observedGuard=null; observedMail=null; observedSent=null;
+    cameraSeenAt=0; vehicleSeenAt=0; observedVehicleOnline=null;
+    try{
+      const saved=JSON.parse(localStorage.getItem(journalPrefix+topic)||'[]');
+      if(Array.isArray(saved))journal=saved.filter(e=>e && typeof e.at==='number' && typeof e.message==='string').slice(-100);
+    }catch{}
+    renderJournal();
+  }
+  function recordEvent(message){
+    selectJournal();
+    journal.push({at:Date.now(),message:String(message)});
+    journal=journal.slice(-100);
+    try{localStorage.setItem(journalPrefix+journalTopic,JSON.stringify(journal));}catch{}
+    renderJournal();
+  }
+  function observeCamera(state,last,mail){
+    selectJournal();
+    cameraSeenAt=Date.now();
+    if(observedGuard!==null && observedGuard!==state){
+      recordEvent('Camera xác nhận trạng thái canh gác: '+({on:'đang bật',off:'đã tắt',waiting:'đang chờ PIR ổn định'}[state]||state));
+    }
+    const sent=Number(last);
+    if(Number.isFinite(sent) && sent>0 && observedSent!==sent){
+      recordEvent('Camera báo gửi email thành công lúc '+new Date(sent*1000).toLocaleString('vi-VN'));
+    }
+    if(mail==='3' && observedMail!=='3')recordEvent('Camera báo lỗi gửi email.');
+    observedGuard=state; observedMail=mail; observedSent=sent;
+    $('iotMail').textContent=mail==='1'?'Email — đang gửi':mail==='3'?'Email — lần gửi gần nhất lỗi':
+      sent>0?'Email — camera báo gửi thành công lúc '+new Date(sent*1000).toLocaleString('vi-VN'):'Email — chưa có lần gửi thành công';
+  }
+  function downloadBlob(blob,name){
+    const url=URL.createObjectURL(blob);
+    const anchor=document.createElement('a');
+    anchor.href=url; anchor.download=name; document.body.appendChild(anchor);
+    anchor.click(); anchor.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),10000);
+  }
+  $('saveSnapshot').onclick=async()=>{
+    if(!camOn || !imageUrl || !camLastFrameAt || Date.now()-camLastFrameAt>2000){
+      $('snapshotResult').textContent='Bật camera và chờ ảnh mới trước khi lưu.';return;
+    }
+    try{
+      const response=await fetch(imageUrl);
+      if(!response.ok)throw Error('Ảnh đã thay đổi, hãy thử lại.');
+      downloadBlob(await response.blob(),'camera-'+Date.now()+'.jpg');
+      $('snapshotResult').textContent='Đã gửi ảnh cho trình duyệt tải xuống.';
+      recordEvent('Người dùng yêu cầu lưu ảnh camera đang xem.');
+    }catch(error){$('snapshotResult').textContent=error.message;}
+  };
+  $('exportJournal').onclick=()=>{
+    selectJournal();
+    downloadBlob(new Blob([JSON.stringify({topic:journalTopic,exportedAt:new Date().toISOString(),events:journal},null,2)],{type:'application/json'}),'nhat-ky-xe.json');
+  };
+  setInterval(()=>{
+    selectJournal();
+    const vehicleOnline=vehicleSeenAt>0 && Date.now()-vehicleSeenAt<TELEMETRY_TIMEOUT_MS;
+    if(observedVehicleOnline!==vehicleOnline && (observedVehicleOnline!==null || vehicleOnline)){
+      recordEvent(vehicleOnline?'Xe đã gửi dữ liệu mới.':'Không nhận dữ liệu xe trong 5 giây.');
+    }
+    observedVehicleOnline=vehicleOnline;
+    $('iotVehicle').textContent=vehicleSeenAt?'Xe — dữ liệu gần nhất '+Math.floor((Date.now()-vehicleSeenAt)/1000)+' giây trước'+(vehicleOnline?'':' · chưa xác nhận online'):'Xe — chưa nhận dữ liệu';
+    $('iotCamera').textContent=cameraSeenAt?'Camera — phản hồi gần nhất '+Math.floor((Date.now()-cameraSeenAt)/1000)+' giây trước':'Camera — chưa xác nhận kết nối';
+  },1000);
+  setInterval(async()=>{
+    if(document.hidden || camOn || cameraPollBusy || !key || !client?.connected)return;
+    cameraPollBusy=true;
+    try{await requestCamera('status');}catch{}finally{cameraPollBusy=false;}
+  },30000);
 
   function logMsg(msg) {
     const box = $('logConsole');
@@ -200,6 +323,7 @@
   }
   function updateTelemetry(data) {
     if (!data || typeof data !== 'object') return;
+    selectJournal(); vehicleSeenAt=Date.now();
     const firmwareVersion = String(data.fw || '');
     const up = Number(data.up);
     if (Number.isFinite(up) && up >= 0) {
@@ -359,6 +483,7 @@
       const split=bytes.indexOf(10);if(split<0 || split>127)return;
       const [id,result,state,last,mail,index]=decoder.decode(bytes.subarray(0,split)).split('|');
       if(!pending.has(id))return;
+      observeCamera(state,last,mail);
       $('guardStatus').textContent=({on:'Đang canh gác',off:'Đã tắt canh gác',waiting:'Chờ PIR ổn định'}[state]||'')+
         (Number(last)?' · Gửi ảnh gần nhất '+new Date(Number(last)*1000).toLocaleString('vi-VN'):'')+
         (mail==='3'?' · Lần gửi gần nhất lỗi':mail==='1'?' · Đang gửi ảnh':'');
@@ -370,6 +495,7 @@
       await unlock();
       const pin=prompt('Nhập mã canh gác GUARD_PIN (từ 4 ký tự)');if(!pin)return;
       const d=await requestCamera(mode,pin);
+      if(d.result==='ok')recordEvent(mode==='arm'?'Camera đã nhận lệnh bật canh gác.':'Camera đã nhận lệnh tắt canh gác.');
       $('guardReply').textContent=d.result==='ok'?'Camera đã xác nhận.':'Kiểm tra lại GUARD_PIN.';
     }catch(e){$('guardReply').textContent=e.message;}
   }
@@ -530,7 +656,125 @@
     clearDriveHold(false); publishCmd('estop', '1');
     logMsg('ĐÃ GỬI YÊU CẦU DỪNG KHẨN CẤP (cần xác nhận xe đã dừng).');
   });
+  let audioSession = null;
+  const audioText = s => { $('audioStatus').textContent = s; };
+  const enc = new TextEncoder();
+  async function audioSend(s, kind, samples) {
+    if (!s.client.connected) return;
+    const raw = new Uint8Array(21 + (samples ? samples.byteLength : 0));
+    raw[0] = kind.charCodeAt(0);
+    raw.set(s.phone, 1); raw.set(s.token, 9);
+    new DataView(raw.buffer).setUint32(17, ++s.seq);
+    if (samples) raw.set(new Uint8Array(samples), 21);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const body = await crypto.subtle.encrypt({name:'AES-GCM', iv, additionalData:enc.encode('down')}, s.key, raw);
+    if ((!s.client.connected) || (kind !== 'S' && audioSession !== s)) return;
+    const packet = new Uint8Array(12 + body.byteLength);
+    packet.set(iv); packet.set(new Uint8Array(body), 12);
+    s.client.publish(s.base+'/down', packet, {qos:0,retain:false});
+  }
+  function stopAudio(msg='Đã dừng âm thanh.') {
+    const s = audioSession;
+    if (!s) return;
+    audioSession=null;
+    clearInterval(s.timer);
+    if (s.confirmed) audioSend(s,'S').catch(()=>{});
+    if (s.stream) s.stream.getTracks().forEach(t=>t.stop());
+    if (s.ctx) s.ctx.close().catch(()=>{});
+    audioText(msg);
+  }
+  async function micPermission() {
+    try {
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      stream.getTracks().forEach(t=>t.stop());
+      audioText('Đã cho phép micro. Giữ nút nói và chờ chữ “Đang nói”.');
+    } catch (_) {audioText('Mở dashboard bằng HTTPS và cho phép Chrome dùng micro.');}
+  }
+  async function beginAudio(mode) {
+    if (audioSession) {stopAudio(); if (mode==='L') return;}
+    if (!client?.connected || !lastVehicleOnline || remoteAllowed===false) {
+      audioText('Kết nối MQTT và bật điều khiển từ xa trên xe trước.'); return;
+    }
+    const hex=$('audioKey').value.trim();
+    if (!/^[a-f0-9]{32}$/i.test(hex)) {audioText('Nhập 32 ký tự AUDIO_KEY từ Serial Monitor của xe.');return;}
+    if (!window.isSecureContext || !crypto.subtle) {audioText('Mở dashboard bằng đường dẫn HTTPS.'); return;}
+    const s={mode,client,base:topicBase+'/audio-v1',phone:crypto.getRandomValues(new Uint8Array(8)),
+      token:new Uint8Array(8),seq:0,rx:0,last:performance.now(),next:0,confirmed:false,started:false};
+    audioSession=s;
+    try {
+      s.ctx=new AudioContext({sampleRate:16000});
+      await s.ctx.resume();
+      s.key=await crypto.subtle.importKey('raw',Uint8Array.from(hex.match(/../g),v=>parseInt(v,16)),'AES-GCM',false,['encrypt','decrypt']);
+      if (audioSession!==s) return;
+      if (mode==='T') {
+        s.stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true}});
+        if (audioSession!==s) {s.stream.getTracks().forEach(t=>t.stop());return;}
+        const url=URL.createObjectURL(new Blob([$('audio-worklet').textContent],{type:'text/javascript'}));
+        try {await s.ctx.audioWorklet.addModule(url);} finally {URL.revokeObjectURL(url);}
+        if (audioSession!==s) return;
+        const source=s.ctx.createMediaStreamSource(s.stream);
+        const node=new AudioWorkletNode(s.ctx,'car-voice');
+        const silent=s.ctx.createGain(); silent.gain.value=0;
+        source.connect(node).connect(silent).connect(s.ctx.destination);
+        node.port.onmessage=({data})=>{
+          if (audioSession!==s || !s.started || s.sending) return;
+          s.sending=true;
+          const pcm=new Int16Array(data), gain=Number($('speakerLevel').value)/100;
+          for(let i=0;i<pcm.length;i++) pcm[i]=Math.max(-32768,Math.min(32767,Math.round(pcm[i]*gain)));
+          audioSend(s,'V',data).catch(()=>{if(audioSession===s)stopAudio('Lỗi gửi tiếng.');}).finally(()=>s.sending=false);
+        };
+      }
+      if (audioSession!==s) return;
+      audioText('Đang chờ xe trả lời…');
+      s.last=performance.now();
+      s.timer=setInterval(()=>{
+        if (audioSession!==s) return;
+        if (!s.client.connected || performance.now()-s.last>4000) {
+          stopAudio('Xe chưa trả lời. Kiểm tra xe đang dừng, MQTT, firmware và khóa âm thanh.');return;
+        }
+        if (!s.confirmed) audioSend(s,'H').catch(()=>{});
+        else if (mode==='L') audioSend(s,'L').catch(()=>{});
+      },650);
+      await audioSend(s,'H');
+    } catch(e) {if(audioSession===s)stopAudio('Lỗi âm thanh: '+e.message);}
+  }
+  async function receiveAudio(payload) {
+    const s=audioSession;
+    if (!s?.key || payload.length<49 || payload.length>1073) return;
+    try {
+      const data=Uint8Array.from(payload);
+      const decoded=await crypto.subtle.decrypt({name:'AES-GCM',iv:data.slice(0,12),additionalData:enc.encode('up')},s.key,data.slice(12));
+      const raw=new Uint8Array(decoded), view=new DataView(decoded);
+      if(audioSession!==s || !s.phone.every((b,i)=>b===raw[i+1])) return;
+      const k=String.fromCharCode(raw[0]), seq=view.getUint32(17);
+      if (seq<=s.rx) return;
+      if(k==='C' && !s.confirmed) {
+        s.rx=seq; s.token=raw.slice(9,17); s.confirmed=true; s.last=performance.now();
+        await audioSend(s,s.mode);return;
+      }
+      if(!s.confirmed || !s.token.every((b,i)=>b===raw[i+9])) return;
+      s.rx=seq; s.last=performance.now();
+      if(!s.started) {s.started=true;audioText(s.mode==='T'?'Đang nói. Thả nút để dừng.':'Đang nghe từ xe. Bấm lại để dừng.');}
+      if(k!=='A' || s.mode!=='L' || raw.length!==1045) return;
+      const now=s.ctx.currentTime;
+      if(s.next>now+0.24) return;
+      const buf=s.ctx.createBuffer(1,512,16000), out=buf.getChannelData(0);
+      for(let i=0;i<512;i++)out[i]=view.getInt16(21+i*2,true)/32768;
+      const src=s.ctx.createBufferSource();src.buffer=buf;src.connect(s.ctx.destination);
+      const at=s.next>now?s.next:now+0.065;src.start(at);s.next=at+buf.duration;
+    } catch (_) { /* Ignore unauthenticated or obsolete frames. */ }
+  }
+  $('audioPermission').onclick=micPermission;
+  $('listenCar').onclick=()=>beginAudio('L');
+  const talkButton=$('talkCar');
+  talkButton.oncontextmenu=e=>e.preventDefault();
+  talkButton.onpointerdown=e=>{if(!e.isPrimary||e.button!==0)return;e.preventDefault();talkButton.setPointerCapture(e.pointerId);beginAudio('T');};
+  for(const ev of ['pointerup','pointercancel','lostpointercapture'])talkButton.addEventListener(ev,()=>{if(audioSession?.mode==='T')stopAudio();});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)stopAudio();});
+  window.addEventListener('pagehide',()=>stopAudio());
+
   async function connectMqtt() {
+    stopAudio();
     clearDriveHold(true);
     if (isSameOriginDirect()) {
       transport = 'direct';
@@ -562,13 +806,14 @@
       lastTelemetryAt = 0; lastVehicleOnline = false;
       refreshMqttPresence();
       logMsg('Đã kết nối MQTT broker; đang CHỜ telemetry mới từ ESP32.');
-      client.subscribe([cameraBase()+'/reply',topicBase + '/telemetry', topicBase + '/status', topicBase + '/event'], {qos:0}, err => { if (err) logMsg('Lỗi đăng ký topic: ' + err.message); });
+      client.subscribe([topicBase+'/audio-v1/up',cameraBase()+'/reply',topicBase + '/telemetry', topicBase + '/status', topicBase + '/event'], {qos:0}, err => { if (err) logMsg('Lỗi đăng ký topic: ' + err.message); });
     });
     client.on('reconnect', () => { mqttTransportUp = false; lastVehicleOnline = false; clearDriveHold(false); setBadge('ĐANG KẾT NỐI LẠI MQTT...', false); enableControls(false); });
     client.on('offline', () => { mqttTransportUp = false; lastVehicleOnline = false; clearDriveHold(false); setBadge('MQTT NGOẠI TUYẾN', false); enableControls(false); });
     client.on('close', () => { mqttTransportUp = false; lastVehicleOnline = false; clearDriveHold(false); if (client) setBadge('MẤT KẾT NỐI MQTT', false); enableControls(false); });
     client.on('error', err => { setBadge('LỖI MQTT', false); logMsg('Lỗi MQTT: ' + (err && err.message ? err.message : 'không rõ')); });
     client.on('message', (receivedTopic, payload) => {
+      if(receivedTopic===topicBase+'/audio-v1/up'){receiveAudio(payload);return;}
       if(receivedTopic===cameraBase()+'/reply'){cameraReply(payload);return;}
       const val = payload.toString();
       if (receivedTopic === topicBase + '/telemetry') {
