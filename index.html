@@ -71,6 +71,24 @@
     <div class="tele-card"><div class="label">TÍN HIỆU WI-FI</div><div id="vRssi" class="val">-- dBm</div></div>
     <div class="tele-card"><div class="label">TRẠNG THÁI XE</div><div id="vStatus" class="val" style="color:var(--yellow-neon);font-size:12px">Đang chờ...</div></div>
   </div><div id="logConsole" class="console-log">[SYSTEM] ESP32 CAR PRO Dashboard Camera + Control • v1.8.0 MJPEG sẵn sàng.</div></div>
+  <div class="card" id="climateCard">
+    <div class="card-header">🌡️ NHIỆT ĐỘ & ĐỘ ẨM PHÒNG</div>
+    <div class="telemetry-grid">
+      <div class="tele-card"><div class="label">NHIỆT ĐỘ</div><div id="shtTemp" class="val">-- °C</div></div>
+      <div class="tele-card"><div class="label">ĐỘ ẨM</div><div id="shtHumidity" class="val">-- %</div></div>
+    </div>
+    <p class="note">Đo gần nhất: <b id="shtTime">Chưa có dữ liệu</b>. Cảm biến gắn trên xe sẽ đo tại vị trí xe đang đứng.</p>
+    <p class="note">Báo khi nằm ngoài ngưỡng liên tục trong thời gian đặt dưới đây.</p>
+    <div class="config-grid">
+      <label class="config-label">Nhiệt độ thấp nhất (°C)<input id="shtTmin" class="config-input" type="number" step="0.5" value="18"></label>
+      <label class="config-label">Nhiệt độ cao nhất (°C)<input id="shtTmax" class="config-input" type="number" step="0.5" value="30"></label>
+      <label class="config-label">Độ ẩm thấp nhất (%)<input id="shtHmin" class="config-input" type="number" step="1" value="30"></label>
+      <label class="config-label">Độ ẩm cao nhất (%)<input id="shtHmax" class="config-input" type="number" step="1" value="70"></label>
+      <label class="config-label">Thời gian vượt ngưỡng (giây)<input id="shtDelay" class="config-input" type="number" min="0" max="3600" step="5" value="60"></label>
+    </div>
+    <p id="shtAlert" role="status" class="note" style="font-weight:700;color:var(--green-neon)">Chưa nhận dữ liệu cảm biến.</p>
+    <p class="note">Ngưỡng lưu trên trình duyệt này. Cảnh báo chỉ hoạt động khi dashboard đang mở và nhận được dữ liệu.</p>
+  </div>
   <div class="card">
     <div class="card-header">GIÁM SÁT HỆ THỐNG</div>
     <p id="iotVehicle">Xe — chưa nhận dữ liệu</p>
@@ -84,7 +102,6 @@
       <ol id="iotJournal"></ol>
     </details>
   </div>
-  <div class="config-card"><div class="card-header">Lịch chăm sóc</div><label class="config-label">Link lịch của gia đình<input id="careUrl" class="config-input" type="url" placeholder="Dán link Apps Script kết thúc bằng /exec"></label><button class="cam-button" id="careOpen">Mở lịch và bàn giao</button></div>
   <div class="config-card"><div class="card-header">Âm thanh trên xe</div>
     <label class="config-label">Mã âm thanh xe · 8 ký tự hoặc khóa cũ<input id="audioKey" maxlength="32" autocapitalize="characters" class="config-input" type="password" autocomplete="off" spellcheck="false"></label>
     <button class="cam-button" id="listenCar">Nghe từ xe / Dừng</button>
@@ -95,7 +112,7 @@
     </label>
     <button class="cam-button" id="playAudioFile">Phát qua loa xe</button>
     <button class="cam-button" id="stopAudioFile">Dừng phát</button>
-    <label class="config-label">Mức giọng phát ở loa xe<input id="speakerLevel" type="range" min="10" max="200" value="70"></label>
+    <label class="config-label">Mức giọng phát ở loa xe<input id="speakerLevel" type="range" min="10" max="100" value="65"></label>
     <label class="config-label">Độ nhạy micro xe<select id="micLevel" class="config-input">
       <option value="1">Thấp · giảm rè</option><option value="2">Vừa</option><option value="3">Cao</option>
     </select></label>
@@ -388,6 +405,39 @@ registerProcessor('car-sound',CarSound);
     $(id).textContent = Number.isFinite(n) && n > 0 ? Math.round(n) + ' CM' : 'N/A';
     $(id).style.color = !Number.isFinite(n)||n<=0 ? 'var(--yellow-neon)' : n<=12 ? 'var(--red-neon)' : 'var(--green-neon)';
   }
+  let climateBreachSince = 0, climateAlarmed = false, climateReceivedAt = 0;
+  function loadClimateLimits() {
+    try {
+      const saved=JSON.parse(localStorage.getItem('esp32climateLimits')||'{}');
+      for(const id of ['shtTmin','shtTmax','shtHmin','shtHmax','shtDelay']) if(saved[id]!==undefined) $(id).value=saved[id];
+    } catch(_) {}
+  }
+  function climateUpdate(data) {
+    if(Date.now()-climateReceivedAt>8000){climateBreachSince=0;climateAlarmed=false;}
+    climateReceivedAt=Date.now();
+    const ok=Number(data.shtAge)>=0 && Number(data.shtAge)<8000 && Number(data.shtOk)===1 && Number.isFinite(Number(data.tempC)) && Number.isFinite(Number(data.humidity));
+    if(!ok) { $('shtTemp').textContent='-- °C'; $('shtHumidity').textContent='-- %'; $('shtTime').textContent='Chưa có dữ liệu (kiểm tra cảm biến/đường I²C)'; $('shtAlert').textContent=data.shtState ? ('SHT3x: '+data.shtState+' · số lỗi: '+(data.shtErrors||0)+' · SDA 21 / SCL 2') : 'Firmware chưa gửi dữ liệu SHT3x. Kiểm tra đã nạp đúng bản mới.'; $('shtAlert').style.color='var(--yellow-neon)'; climateBreachSince=0; climateAlarmed=false; return; }
+    const t=Number(data.tempC), h=Number(data.humidity), age=Math.max(0,Number(data.shtAge)||0);
+    $('shtTemp').textContent=t.toFixed(1)+' °C'; $('shtHumidity').textContent=h.toFixed(1)+' %';
+    $('shtTime').textContent=new Date(Date.now()-age).toLocaleTimeString('vi-VN');
+    const n=id=>Number($(id).value), delay=Math.max(0,Math.min(3600,n('shtDelay')||0))*1000;
+    const bad=t<n('shtTmin')||t>n('shtTmax')||h<n('shtHmin')||h>n('shtHmax');
+    if(!bad){climateBreachSince=0;climateAlarmed=false;$('shtAlert').textContent='Nhiệt độ và độ ẩm đang trong ngưỡng.';$('shtAlert').style.color='var(--green-neon)';return;}
+    if(!climateBreachSince)climateBreachSince=Date.now();
+    const left=delay-(Date.now()-climateBreachSince);
+    if(left<=0){$('shtAlert').textContent='⚠ Ngoài ngưỡng: '+t.toFixed(1)+' °C, '+h.toFixed(1)+' %';$('shtAlert').style.color='var(--red-neon)';if(!climateAlarmed){logMsg('CẢNH BÁO nhiệt độ/độ ẩm đã vượt ngưỡng trong thời gian cài đặt.');climateAlarmed=true;}}
+    else{$('shtAlert').textContent='Ngoài ngưỡng; sẽ báo sau '+Math.ceil(left/1000)+' giây nếu vẫn tiếp diễn.';$('shtAlert').style.color='var(--yellow-neon)';}
+  }
+  setInterval(()=>{
+    if(climateReceivedAt && Date.now()-climateReceivedAt>8000){
+      climateBreachSince=0;climateAlarmed=false;
+      $('shtAlert').textContent='Dữ liệu cảm biến đã cũ / mất kết nối.';
+      $('shtAlert').style.color='var(--yellow-neon)';
+      $('shtTemp').textContent='-- °C';$('shtHumidity').textContent='-- %';
+    }
+  },1000);
+  loadClimateLimits();
+  for(const id of ['shtTmin','shtTmax','shtHmin','shtHmax','shtDelay']) $(id).addEventListener('change',()=>{localStorage.setItem('esp32climateLimits',JSON.stringify(Object.fromEntries(['shtTmin','shtTmax','shtHmin','shtHmax','shtDelay'].map(k=>[k,$(k).value]))));climateBreachSince=0;climateAlarmed=false;});
   function updateTelemetry(data) {
     if (!data || typeof data !== 'object') return;
     selectJournal(); vehicleSeenAt=Date.now();
@@ -405,6 +455,7 @@ registerProcessor('car-sound',CarSound);
     }
     const d = Array.isArray(data.d) ? data.d : [];
     const age = Array.isArray(data.age) ? data.age : [];
+    climateUpdate(data);
     const shows = [
       ['vFront',0], ['vBack',1], ['vFL',2], ['vFR',3]
     ];
@@ -723,12 +774,6 @@ registerProcessor('car-sound',CarSound);
     clearDriveHold(false); publishCmd('estop', '1');
     logMsg('ĐÃ GỬI YÊU CẦU DỪNG KHẨN CẤP (cần xác nhận xe đã dừng).');
   });
-  $('careUrl').value=localStorage.getItem('care-webapp')||'';
-  $('careOpen').onclick=()=>{
-    const url=$('careUrl').value.trim();
-    if(!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url)){alert('Dán link triển khai Apps Script kết thúc bằng /exec.');return;}
-    localStorage.setItem('care-webapp',url);window.open(url,'_blank','noopener');
-  };
   let audioSession = null;
   let talkHeld=false;
   const audioText = s => { $('audioStatus').textContent = s; };
@@ -799,7 +844,7 @@ registerProcessor('car-sound',CarSound);
 
       if (audioSession!==s) return;
       if (mode==='T' && !playback) {
-        s.stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+        s.stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:false}});
         if (audioSession!==s) {s.stream.getTracks().forEach(t=>t.stop());return;}
         const source=s.ctx.createMediaStreamSource(s.stream);
         const highpass=s.ctx.createBiquadFilter();
