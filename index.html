@@ -112,7 +112,7 @@
     </label>
     <button class="cam-button" id="playAudioFile">Phát qua loa xe</button>
     <button class="cam-button" id="stopAudioFile">Dừng phát</button>
-    <label class="config-label">Mức giọng phát ở loa xe<input id="speakerLevel" type="range" min="10" max="200" value="70"></label>
+    <label class="config-label">Mức giọng phát ở loa xe<input id="speakerLevel" type="range" min="10" max="100" value="65"></label>
     <label class="config-label">Độ nhạy micro xe<select id="micLevel" class="config-input">
       <option value="1">Thấp · giảm rè</option><option value="2">Vừa</option><option value="3">Cao</option>
     </select></label>
@@ -405,7 +405,7 @@ registerProcessor('car-sound',CarSound);
     $(id).textContent = Number.isFinite(n) && n > 0 ? Math.round(n) + ' CM' : 'N/A';
     $(id).style.color = !Number.isFinite(n)||n<=0 ? 'var(--yellow-neon)' : n<=12 ? 'var(--red-neon)' : 'var(--green-neon)';
   }
-  let climateBreachSince = 0, climateAlarmed = false;
+  let climateBreachSince = 0, climateAlarmed = false, climateReceivedAt = 0;
   function loadClimateLimits() {
     try {
       const saved=JSON.parse(localStorage.getItem('esp32climateLimits')||'{}');
@@ -413,8 +413,10 @@ registerProcessor('car-sound',CarSound);
     } catch(_) {}
   }
   function climateUpdate(data) {
-    const ok=Number(data.shtOk)===1 && Number.isFinite(Number(data.tempC)) && Number.isFinite(Number(data.humidity));
-    if(!ok) { $('shtTemp').textContent='-- °C'; $('shtHumidity').textContent='-- %'; $('shtTime').textContent='Chưa có dữ liệu (kiểm tra cảm biến/đường I²C)'; $('shtAlert').textContent='Chưa nhận được số đo hợp lệ từ SHT3x.'; $('shtAlert').style.color='var(--yellow-neon)'; climateBreachSince=0; climateAlarmed=false; return; }
+    if(Date.now()-climateReceivedAt>8000){climateBreachSince=0;climateAlarmed=false;}
+    climateReceivedAt=Date.now();
+    const ok=Number(data.shtAge)>=0 && Number(data.shtAge)<8000 && Number(data.shtOk)===1 && Number.isFinite(Number(data.tempC)) && Number.isFinite(Number(data.humidity));
+    if(!ok) { $('shtTemp').textContent='-- °C'; $('shtHumidity').textContent='-- %'; $('shtTime').textContent='Chưa có dữ liệu (kiểm tra cảm biến/đường I²C)'; $('shtAlert').textContent=data.shtState ? ('SHT3x: '+data.shtState+' · số lỗi: '+(data.shtErrors||0)+' · SDA 21 / SCL 2') : 'Firmware chưa gửi dữ liệu SHT3x. Kiểm tra đã nạp đúng bản mới.'; $('shtAlert').style.color='var(--yellow-neon)'; climateBreachSince=0; climateAlarmed=false; return; }
     const t=Number(data.tempC), h=Number(data.humidity), age=Math.max(0,Number(data.shtAge)||0);
     $('shtTemp').textContent=t.toFixed(1)+' °C'; $('shtHumidity').textContent=h.toFixed(1)+' %';
     $('shtTime').textContent=new Date(Date.now()-age).toLocaleTimeString('vi-VN');
@@ -426,6 +428,14 @@ registerProcessor('car-sound',CarSound);
     if(left<=0){$('shtAlert').textContent='⚠ Ngoài ngưỡng: '+t.toFixed(1)+' °C, '+h.toFixed(1)+' %';$('shtAlert').style.color='var(--red-neon)';if(!climateAlarmed){logMsg('CẢNH BÁO nhiệt độ/độ ẩm đã vượt ngưỡng trong thời gian cài đặt.');climateAlarmed=true;}}
     else{$('shtAlert').textContent='Ngoài ngưỡng; sẽ báo sau '+Math.ceil(left/1000)+' giây nếu vẫn tiếp diễn.';$('shtAlert').style.color='var(--yellow-neon)';}
   }
+  setInterval(()=>{
+    if(climateReceivedAt && Date.now()-climateReceivedAt>8000){
+      climateBreachSince=0;climateAlarmed=false;
+      $('shtAlert').textContent='Dữ liệu cảm biến đã cũ / mất kết nối.';
+      $('shtAlert').style.color='var(--yellow-neon)';
+      $('shtTemp').textContent='-- °C';$('shtHumidity').textContent='-- %';
+    }
+  },1000);
   loadClimateLimits();
   for(const id of ['shtTmin','shtTmax','shtHmin','shtHmax','shtDelay']) $(id).addEventListener('change',()=>{localStorage.setItem('esp32climateLimits',JSON.stringify(Object.fromEntries(['shtTmin','shtTmax','shtHmin','shtHmax','shtDelay'].map(k=>[k,$(k).value]))));climateBreachSince=0;climateAlarmed=false;});
   function updateTelemetry(data) {
@@ -834,7 +844,7 @@ registerProcessor('car-sound',CarSound);
 
       if (audioSession!==s) return;
       if (mode==='T' && !playback) {
-        s.stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+        s.stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:false}});
         if (audioSession!==s) {s.stream.getTracks().forEach(t=>t.stop());return;}
         const source=s.ctx.createMediaStreamSource(s.stream);
         const highpass=s.ctx.createBiquadFilter();
