@@ -84,11 +84,17 @@
       <ol id="iotJournal"></ol>
     </details>
   </div>
+  <div class="config-card"><div class="card-header">Lịch chăm sóc</div><label class="config-label">Link lịch của gia đình<input id="careUrl" class="config-input" type="url" placeholder="Dán link Apps Script kết thúc bằng /exec"></label><button class="cam-button" id="careOpen">Mở lịch và bàn giao</button></div>
   <div class="config-card"><div class="card-header">Âm thanh trên xe</div>
     <label class="config-label">Mã âm thanh xe · 8 ký tự hoặc khóa cũ<input id="audioKey" maxlength="32" autocapitalize="characters" class="config-input" type="password" autocomplete="off" spellcheck="false"></label>
     <button class="cam-button" id="listenCar">Nghe từ xe / Dừng</button>
     <button class="cam-button" id="audioPermission">Cho phép micro điện thoại</button>
     <button class="cam-button" id="talkCar" style="touch-action:none;user-select:none">Giữ để nói</button>
+    <label class="config-label">Chọn bản ghi hoặc nhạc
+      <input id="audioFile" class="config-input" type="file" accept="audio/*">
+    </label>
+    <button class="cam-button" id="playAudioFile">Phát qua loa xe</button>
+    <button class="cam-button" id="stopAudioFile">Dừng phát</button>
     <label class="config-label">Mức giọng phát ở loa xe<input id="speakerLevel" type="range" min="10" max="200" value="70"></label>
     <label class="config-label">Độ nhạy micro xe<select id="micLevel" class="config-input">
       <option value="1">Thấp · giảm rè</option><option value="2">Vừa</option><option value="3">Cao</option>
@@ -717,6 +723,12 @@ registerProcessor('car-sound',CarSound);
     clearDriveHold(false); publishCmd('estop', '1');
     logMsg('ĐÃ GỬI YÊU CẦU DỪNG KHẨN CẤP (cần xác nhận xe đã dừng).');
   });
+  $('careUrl').value=localStorage.getItem('care-webapp')||'';
+  $('careOpen').onclick=()=>{
+    const url=$('careUrl').value.trim();
+    if(!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url)){alert('Dán link triển khai Apps Script kết thúc bằng /exec.');return;}
+    localStorage.setItem('care-webapp',url);window.open(url,'_blank','noopener');
+  };
   let audioSession = null;
   let talkHeld=false;
   const audioText = s => { $('audioStatus').textContent = s; };
@@ -754,7 +766,7 @@ registerProcessor('car-sound',CarSound);
       audioText('Đã cho phép micro. Giữ nút nói và chờ chữ “Đang nói”.');
     } catch (_) {audioText('Mở dashboard bằng HTTPS và cho phép Chrome dùng micro.');}
   }
-  async function beginAudio(mode) {
+  async function beginAudio(mode, playback=false) {
     if (audioSession) {await stopAudio(); if (mode==='L') return;}
     if(mode==='T' && !talkHeld)return;
     if (!client?.connected || !lastVehicleOnline || remoteAllowed===false) {
@@ -780,11 +792,13 @@ registerProcessor('car-sound',CarSound);
       const url=URL.createObjectURL(new Blob([$('audio-worklet').textContent],{type:'text/javascript'}));
       try {await s.ctx.audioWorklet.addModule(url);} finally {URL.revokeObjectURL(url);}
       if(audioSession!==s)return;
-      s.node=new AudioWorkletNode(s.ctx,'car-sound',{processorOptions:{mode},outputChannelCount:[1]});
+      if(mode==='L' || (mode==='T' && !playback))
+        s.node=new AudioWorkletNode(s.ctx,'car-sound',{processorOptions:{mode},outputChannelCount:[1]});
       if(mode==='L')s.node.connect(s.ctx.destination);
+      s.playback=playback;
 
       if (audioSession!==s) return;
-      if (mode==='T') {
+      if (mode==='T' && !playback) {
         s.stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
         if (audioSession!==s) {s.stream.getTracks().forEach(t=>t.stop());return;}
         const source=s.ctx.createMediaStreamSource(s.stream);
@@ -841,12 +855,55 @@ registerProcessor('car-sound',CarSound);
       }
       if(!s.confirmed || !s.token.every((b,i)=>b===raw[i+9])) return;
       s.rx=seq; s.last=performance.now();
-      if(!s.started) {s.started=true;audioText(s.mode==='T'?'Đang nói. Thả nút để dừng.':'Đang nghe từ xe. Bấm lại để dừng.');}
+      if(!s.started) {s.started=true;audioText(s.playback?'Đang phát bản ghi qua loa xe.':(s.mode==='T'?'Đang nói. Thả nút để dừng.':'Đang nghe từ xe. Bấm lại để dừng.'));}
       if(k!=='A' || s.mode!=='L' || raw.length!==1045) return;
       s.node.port.postMessage(raw.slice(21).buffer);
 
     } catch (_) { /* Ignore unauthenticated or obsolete frames. */ }
   }
+  async function playSelectedFile() {
+    const file=$('audioFile').files?.[0];
+    if(!file){audioText('Chọn một file âm thanh trước.');return;}
+    if(file.size>10*1024*1024){audioText('File quá lớn. Chọn file dưới 10 MB.');return;}
+    let decoded;
+    try {
+      const ctx=new AudioContext();
+      try {decoded=await ctx.decodeAudioData(await file.arrayBuffer());}
+      finally {await ctx.close();}
+    } catch (_) {audioText('Điện thoại không đọc được định dạng file này. Thử MP3 hoặc WAV.');return;}
+    const length=Math.ceil(decoded.duration*16000);
+    if(!length || decoded.duration>30){audioText('Chọn bản ghi dài tối đa 30 giây.');return;}
+    if(audioSession)await stopAudio();
+    talkHeld=true;
+    await beginAudio('T',true);
+    const s=audioSession;
+    if(!s || s.mode!=='T') {talkHeld=false;return;}
+    s.playback=true;
+    let sample=0,failed=false;
+    const channel=decoded.getChannelData(0),gain=Number($('speakerLevel').value)/100;
+    audioText('Đang kết nối loa xe…');
+    while(audioSession===s && s.started && sample<length && client?.connected) {
+      const pcm=new Int16Array(512);
+      for(let i=0;i<512 && sample<length;i++,sample++) {
+        const position=sample*decoded.sampleRate/16000;
+        const at=Math.floor(position),fraction=position-at;
+        const first=channel[Math.min(at,channel.length-1)]||0;
+        const second=channel[Math.min(at+1,channel.length-1)]||0;
+        const value=(first+(second-first)*fraction)*gain;
+        const peak=Math.abs(value);
+        const limited=peak<=0.8?peak:0.8+0.2*Math.tanh((peak-0.8)/0.2);
+        pcm[i]=Math.round(Math.sign(value)*limited*32767);
+      }
+      try {await audioSend(s,'V',pcm.buffer);}
+      catch(_){failed=true;break;}
+      if(audioSession!==s)break;
+      await new Promise(resolve=>setTimeout(resolve,32));
+    }
+    if(audioSession===s)await stopAudio(failed?'Mất kết nối khi phát.':'Đã phát xong bản ghi.');
+    talkHeld=false;
+  }
+  $('playAudioFile').onclick=playSelectedFile;
+  $('stopAudioFile').onclick=()=>{talkHeld=false;stopAudio('Đã dừng phát.');};
   $('micLevel').onchange=()=>{if(audioSession?.confirmed)audioSend(audioSession,$('micLevel').value).catch(()=>{});};
   $('audioPermission').onclick=micPermission;
   $('listenCar').onclick=()=>beginAudio('L');
