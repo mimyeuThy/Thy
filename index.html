@@ -80,14 +80,14 @@
     <p class="note">Đo gần nhất: <b id="shtTime">Chưa có dữ liệu</b>. Cảm biến gắn trên xe sẽ đo tại vị trí xe đang đứng.</p>
     <p class="note">Báo khi nằm ngoài ngưỡng liên tục trong thời gian đặt dưới đây.</p>
     <div class="config-grid">
-      <label class="config-label">Nhiệt độ thấp nhất (°C)<input id="shtTmin" class="config-input" type="number" step="0.5" value="18"></label>
-      <label class="config-label">Nhiệt độ cao nhất (°C)<input id="shtTmax" class="config-input" type="number" step="0.5" value="30"></label>
-      <label class="config-label">Độ ẩm thấp nhất (%)<input id="shtHmin" class="config-input" type="number" step="1" value="30"></label>
-      <label class="config-label">Độ ẩm cao nhất (%)<input id="shtHmax" class="config-input" type="number" step="1" value="70"></label>
-      <label class="config-label">Thời gian vượt ngưỡng (giây)<input id="shtDelay" class="config-input" type="number" min="0" max="3600" step="5" value="60"></label>
+      <label class="config-label">Nhiệt độ thấp nhất (°C)<input id="shtTmin" class="config-input" type="number" step="0.5" value="20"></label>
+      <label class="config-label">Nhiệt độ cao nhất (°C)<input id="shtTmax" class="config-input" type="number" step="0.5" value="32"></label>
+      <label class="config-label">Độ ẩm thấp nhất (%)<input id="shtHmin" class="config-input" type="number" step="1" value="40"></label>
+      <label class="config-label">Độ ẩm cao nhất (%)<input id="shtHmax" class="config-input" type="number" step="1" value="80"></label>
+      <label class="config-label">Thời gian vượt ngưỡng (giây)<input id="shtDelay" class="config-input" type="number" min="0" max="3600" step="5" value="65"></label>
     </div>
     <p id="shtAlert" role="status" class="note" style="font-weight:700;color:var(--green-neon)">Chưa nhận dữ liệu cảm biến.</p>
-    <p class="note">Ngưỡng lưu trên trình duyệt này. Cảnh báo chỉ hoạt động khi dashboard đang mở và nhận được dữ liệu.</p>
+    <p class="note">Ngưỡng các ô này lưu trên trình duyệt và chỉ cảnh báo trên dashboard khi trang mở. Cảnh báo Gmail hoạt động riêng qua ESP32 và Apps Script, kể cả khi đóng dashboard; Gmail dùng ngưỡng cố định 20/32 °C, 40/80 % trong 65 giây.</p>
   </div>
   <div class="card">
     <div class="card-header">GIÁM SÁT HỆ THỐNG</div>
@@ -416,7 +416,7 @@ registerProcessor('car-sound',CarSound);
     if(Date.now()-climateReceivedAt>8000){climateBreachSince=0;climateAlarmed=false;}
     climateReceivedAt=Date.now();
     const ok=Number(data.shtAge)>=0 && Number(data.shtAge)<8000 && Number(data.shtOk)===1 && Number.isFinite(Number(data.tempC)) && Number.isFinite(Number(data.humidity));
-    if(!ok) { $('shtTemp').textContent='-- °C'; $('shtHumidity').textContent='-- %'; $('shtTime').textContent='Chưa có dữ liệu (kiểm tra cảm biến/đường I²C)'; $('shtAlert').textContent=data.shtState ? ('SHT3x: '+data.shtState+' · số lỗi: '+(data.shtErrors||0)+' · SDA 21 / SCL 2') : 'Firmware chưa gửi dữ liệu SHT3x. Kiểm tra đã nạp đúng bản mới.'; $('shtAlert').style.color='var(--yellow-neon)'; climateBreachSince=0; climateAlarmed=false; return; }
+    if(!ok) { $('shtTemp').textContent='-- °C'; $('shtHumidity').textContent='-- %'; $('shtTime').textContent='Chưa có dữ liệu (kiểm tra cảm biến/đường I²C)'; $('shtAlert').textContent=data.shtState ? ('SHT3x: '+data.shtState+' · số lỗi: '+(data.shtErrors||0)+' · SDA 21 / SCL 0') : 'Firmware chưa gửi dữ liệu SHT3x. Kiểm tra đã nạp đúng bản mới.'; $('shtAlert').style.color='var(--yellow-neon)'; climateBreachSince=0; climateAlarmed=false; return; }
     const t=Number(data.tempC), h=Number(data.humidity), age=Math.max(0,Number(data.shtAge)||0);
     $('shtTemp').textContent=t.toFixed(1)+' °C'; $('shtHumidity').textContent=h.toFixed(1)+' %';
     $('shtTime').textContent=new Date(Date.now()-age).toLocaleTimeString('vi-VN');
