@@ -80,14 +80,20 @@
     <p class="note">Đo gần nhất: <b id="shtTime">Chưa có dữ liệu</b>. Cảm biến gắn trên xe sẽ đo tại vị trí xe đang đứng.</p>
     <p class="note">Báo khi nằm ngoài ngưỡng liên tục trong thời gian đặt dưới đây.</p>
     <div class="config-grid">
-      <label class="config-label">Nhiệt độ thấp nhất (°C)<input id="shtTmin" class="config-input" type="number" step="0.5" value="18"></label>
-      <label class="config-label">Nhiệt độ cao nhất (°C)<input id="shtTmax" class="config-input" type="number" step="0.5" value="30"></label>
-      <label class="config-label">Độ ẩm thấp nhất (%)<input id="shtHmin" class="config-input" type="number" step="1" value="30"></label>
-      <label class="config-label">Độ ẩm cao nhất (%)<input id="shtHmax" class="config-input" type="number" step="1" value="70"></label>
-      <label class="config-label">Thời gian vượt ngưỡng (giây)<input id="shtDelay" class="config-input" type="number" min="0" max="3600" step="5" value="60"></label>
+      <label class="config-label">Nhiệt độ thấp nhất (°C)<input id="shtTmin" class="config-input" type="number" step="0.5" value="20"></label>
+      <label class="config-label">Nhiệt độ cao nhất (°C)<input id="shtTmax" class="config-input" type="number" step="0.5" value="32"></label>
+      <label class="config-label">Độ ẩm thấp nhất (%)<input id="shtHmin" class="config-input" type="number" step="1" value="40"></label>
+      <label class="config-label">Độ ẩm cao nhất (%)<input id="shtHmax" class="config-input" type="number" step="1" value="80"></label>
+      <label class="config-label">Thời gian vượt ngưỡng (giây)<input id="shtDelay" class="config-input" type="number" min="0" max="3600" step="5" value="30"></label>
     </div>
     <p id="shtAlert" role="status" class="note" style="font-weight:700;color:var(--green-neon)">Chưa nhận dữ liệu cảm biến.</p>
-    <p class="note">Ngưỡng lưu trên trình duyệt này. Cảnh báo chỉ hoạt động khi dashboard đang mở và nhận được dữ liệu.</p>
+    <div class="config-grid">
+      <label class="config-label">URL ứng dụng web SHT (/exec)<input id="shtCloudUrl" class="config-input" type="url" placeholder="https://script.google.com/macros/s/.../exec"></label>
+      <label class="config-label">IOT_KEY của Apps Script SHT<input id="shtCloudKey" class="config-input" type="password" autocomplete="off" placeholder="Giống khóa trong SHTTask.h"></label>
+    </div>
+    <button id="shtSaveCloud" type="button" class="btn">Lưu ngưỡng gửi Gmail</button>
+    <p id="shtCloudStatus" class="note" role="status">Sau khi chỉnh ngưỡng, bấm Lưu ngưỡng gửi Gmail. Trang xác nhận sẽ mở ở tab mới.</p>
+    <p class="note">Chỉ khi trang xác nhận báo Đã lưu ngưỡng Gmail, máy chủ mới dùng ngưỡng mới. Xe vẫn gửi cảnh báo khi đóng dashboard nếu có nguồn và Wi-Fi Internet. Khóa không được lưu trên trình duyệt.</p>
   </div>
   <div class="card">
     <div class="card-header">GIÁM SÁT HỆ THỐNG</div>
@@ -412,6 +418,23 @@ registerProcessor('car-sound',CarSound);
       for(const id of ['shtTmin','shtTmax','shtHmin','shtHmax','shtDelay']) if(saved[id]!==undefined) $(id).value=saved[id];
     } catch(_) {}
   }
+  $('shtCloudUrl').value=localStorage.getItem('shtCloudUrl')||'';
+  $('shtSaveCloud').addEventListener('click',()=>{
+    const ids=['shtTmin','shtTmax','shtHmin','shtHmax','shtDelay'];
+    if(ids.some(id=>!$(id).value.trim())) { $('shtCloudStatus').textContent='Điền đủ các ngưỡng và thời gian.';return; }
+    const limits={tMin:Number($('shtTmin').value),tMax:Number($('shtTmax').value),rhMin:Number($('shtHmin').value),rhMax:Number($('shtHmax').value),delayMs:Number($('shtDelay').value)*1000};
+    const url=$('shtCloudUrl').value.trim(),key=$('shtCloudKey').value;
+    if(!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url)) { $('shtCloudStatus').textContent='Điền URL Apps Script SHT đầy đủ, kết thúc /exec.';return; }
+    if(!key) { $('shtCloudStatus').textContent='Điền IOT_KEY giống Script properties và SHTTask.h.';return; }
+    if(!Object.values(limits).every(Number.isFinite)||limits.tMin< -40||limits.tMax>125||limits.tMin>=limits.tMax||limits.rhMin<0||limits.rhMax>100||limits.rhMin>=limits.rhMax||limits.delayMs<0||limits.delayMs>3600000) { $('shtCloudStatus').textContent='Ngưỡng không hợp lệ. Giá trị thấp nhất phải nhỏ hơn cao nhất.';return; }
+    localStorage.setItem('shtCloudUrl',url);
+    const form=document.createElement('form');
+    form.method='POST';form.action=url;form.target='_blank';
+    const input=document.createElement('input');input.type='hidden';input.name='payload';
+    input.value=JSON.stringify({action:'save_limits',key,limits});form.appendChild(input);
+    document.body.appendChild(form);form.submit();form.remove();
+    $('shtCloudStatus').textContent='Đã gửi yêu cầu. Xem tab xác nhận: chỉ khi báo Đã lưu ngưỡng Gmail mới lưu thành công. Nếu không thấy tab, cho phép mở tab mới rồi bấm lại.';
+  });
   function climateUpdate(data) {
     if(Date.now()-climateReceivedAt>8000){climateBreachSince=0;climateAlarmed=false;}
     climateReceivedAt=Date.now();
