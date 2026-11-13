@@ -71,6 +71,23 @@
     <div class="tele-card"><div class="label">TÍN HIỆU WI-FI</div><div id="vRssi" class="val">-- dBm</div></div>
     <div class="tele-card"><div class="label">TRẠNG THÁI XE</div><div id="vStatus" class="val" style="color:var(--yellow-neon);font-size:12px">Đang chờ...</div></div>
   </div><div id="logConsole" class="console-log">[SYSTEM] ESP32 CAR PRO Dashboard Camera + Control • v1.8.0 MJPEG sẵn sàng.</div></div>
+  <div class="card" id="cryCard">
+    <div class="card-header">👶 E-NANNY · HO / KHÓC / TIẾNG NỀN</div>
+    <p id="cryStatus" role="status">Chưa nhận dữ liệu E-Nanny từ xe.</p>
+    <div class="telemetry-grid">
+      <div class="tele-card"><div class="label">HO · COUGH</div><div class="val" id="cryCough">--</div></div>
+      <div class="tele-card"><div class="label">KHÓC · CRY</div><div class="val" id="cryValue">--</div></div>
+      <div class="tele-card"><div class="label">TIẾNG NỀN · NOISE</div><div class="val" id="cryNoise">--</div></div>
+    </div>
+    <div class="config-grid">
+      <label class="config-label">Ngưỡng điểm tiếng khóc (0,50–0,99)<input id="cryCut" class="config-input" type="number" min="0.50" max="0.99" step="0.01" value="0.75"></label>
+    </div>
+    <button id="cryEnable" type="button">Bật giám sát tiếng khóc</button>
+    <button id="cryDisable" type="button">Tắt giám sát</button>
+    <button id="crySaveCut" type="button">Lưu ngưỡng tiếng khóc</button>
+    <p id="cryMailStatus" class="note">Gmail dùng URL và IOT_KEY đã nạp vào ESP32.</p>
+    <p class="note">Điểm của mô hình thử nghiệm, không phải độ chính xác thực tế. Nhận diện tiếp tục khi dashboard đóng. Tạm dừng khi xe chạy/loa xe phát; có khoảng nghỉ trong lúc xử lý từng đoạn. Chỉ gửi Gmail cho nhãn khóc; chống lặp cùng đợt và cách tối thiểu 60 giây.</p>
+  </div>
   <div class="card" id="climateCard">
     <div class="card-header">🌡️ NHIỆT ĐỘ & ĐỘ ẨM PHÒNG</div>
     <div class="telemetry-grid">
@@ -392,6 +409,9 @@ registerProcessor('car-sound',CarSound);
     if (transport === 'direct') {
       if (path === 'drive') {
         fetchDirect('/cmd?val=' + encodeURIComponent(payload)).catch(() => {});
+      } else if (path === 'cry' || path === 'crycut') {
+        const form=new URLSearchParams();form.set(path==='cry'?'on':'cut',String(payload));
+        fetchDirect('/cry',{method:'POST',body:form}).then(r=>{if(!r.ok)logMsg('Không lưu được E-Nanny: HTTP '+r.status);}).catch(e=>logMsg(e.message));
       } else if (path === 'speed') {
         fetchDirect('/speed?val=' + encodeURIComponent(payload)).then(r => {if (!r.ok) logMsg('Đổi tốc độ bị từ chối: HTTP ' + r.status);}).catch(() => {});
       } else if (path === 'estop') {
@@ -435,6 +455,22 @@ registerProcessor('car-sound',CarSound);
     document.body.appendChild(form);form.submit();form.remove();
     $('shtCloudStatus').textContent='Đã gửi yêu cầu. Xem tab xác nhận: chỉ khi báo Đã lưu ngưỡng Gmail mới lưu thành công. Nếu không thấy tab, cho phép mở tab mới rồi bấm lại.';
   });
+  $('cryEnable').addEventListener('click',()=>publishCmd('cry','1'));
+  $('cryDisable').addEventListener('click',()=>publishCmd('cry','0'));
+  $('crySaveCut').addEventListener('click',()=>{
+    const value=Number($('cryCut').value);
+    if(!Number.isFinite(value)||value<0.5||value>0.99){logMsg('Ngưỡng tiếng khóc phải từ 0,50 đến 0,99.');return;}
+    publishCmd('crycut',String(value));
+  });
+  function cryUpdate(d){
+    const names={init_error:'Không khởi tạo được mô hình/bộ nhớ',off:'Đã tắt',paused:'Tạm dừng: xe chạy hoặc loa đang phát',model_error:'Lỗi xử lý mô hình',collecting:'Đang thu âm',analyzing:'Đang phân tích',stale:'Kết quả đã cũ',ready:'Đang giám sát'};
+    $('cryStatus').textContent=names[d.cryState]||'Firmware chưa có E-Nanny.';
+    const valid=Number(d.cryAge)>=0&&Number(d.cryAge)<10000&&d.cryState!=='model_error'&&d.cryState!=='paused'&&d.cryState!=='off';
+    for(const [id,key] of [['cryCough','cryCough'],['cryValue','cryScore'],['cryNoise','cryNoise']])$(id).textContent=valid?(Number(d[key])*100).toFixed(1)+'%':'--';
+    if(valid&&Number(d.cryScore)>Number(d.cryThreshold))$('cryStatus').textContent+=' · Nghi có tiếng khóc';
+    if(d.cryError)$('cryStatus').textContent+=' · mã lỗi '+d.cryError;
+    $('cryMailStatus').textContent='Ngưỡng đang lưu trên xe: '+(d.cryThreshold??'--')+' · Gmail: '+(Number(d.cryMailPending)?'có sự kiện chờ gửi':Number(d.cryMailHttp)===200?'đã xác nhận lần gửi gần nhất':'chưa có sự kiện gửi thành công')+' · HTTP '+(d.cryMailHttp??0);
+  }
   function climateUpdate(data) {
     if(Date.now()-climateReceivedAt>8000){climateBreachSince=0;climateAlarmed=false;}
     climateReceivedAt=Date.now();
@@ -479,6 +515,7 @@ registerProcessor('car-sound',CarSound);
     const d = Array.isArray(data.d) ? data.d : [];
     const age = Array.isArray(data.age) ? data.age : [];
     climateUpdate(data);
+    cryUpdate(data);
     const shows = [
       ['vFront',0], ['vBack',1], ['vFL',2], ['vFR',3]
     ];
