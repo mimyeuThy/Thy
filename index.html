@@ -65,7 +65,10 @@
     <div class="sensor-box pos-sonar-rear"><div class="title">SIÊU ÂM SAU</div><div id="vBack" class="value">-- CM</div></div>
   </div>
 <p class="note">N/A = chưa đo được. CŨ = số đo chưa cập nhật.</p>
-  <div class="telemetry-grid" style="grid-template-columns:1fr">
+  <div class="telemetry-grid">
+    <div class="tele-card"><div class="label">PIN 3S</div><div id="vBat" class="val">-- V</div><div class="battery-bar"><div id="vBatBar" class="battery-fill"></div></div></div>
+    <div class="tele-card"><div class="label">PWM TIẾN/LÙI</div><div id="vSpeed" class="val">--</div></div>
+    <div class="tele-card"><div class="label">TÍN HIỆU WI-FI</div><div id="vRssi" class="val">-- dBm</div></div>
     <div class="tele-card"><div class="label">TRẠNG THÁI XE</div><div id="vStatus" class="val" style="color:var(--yellow-neon);font-size:12px">Đang chờ...</div></div>
   </div><div id="logConsole" class="console-log">[SYSTEM] ESP32 CAR PRO Dashboard Camera + Control • v1.8.0 MJPEG sẵn sàng.</div></div>
   <div class="card" id="cryCard">
@@ -125,8 +128,14 @@
   <div class="config-card"><div class="card-header">Âm thanh trên xe</div>
     <label class="config-label">Mã âm thanh xe · 8 ký tự hoặc khóa cũ<input id="audioKey" maxlength="32" autocapitalize="characters" class="config-input" type="password" autocomplete="off" spellcheck="false"></label>
     <button class="cam-button" id="listenCar">Nghe từ xe / Dừng</button>
+    <button class="cam-button" id="audioPermission">Cho phép micro điện thoại</button>
     <button class="cam-button" id="talkCar" style="touch-action:none;user-select:none">Giữ để nói</button>
-<label class="config-label">Mức giọng phát ở loa xe<input id="speakerLevel" type="range" min="10" max="100" value="65"></label>
+    <label class="config-label">Chọn bản ghi hoặc nhạc
+      <input id="audioFile" class="config-input" type="file" accept="audio/*">
+    </label>
+    <button class="cam-button" id="playAudioFile">Phát qua loa xe</button>
+    <button class="cam-button" id="stopAudioFile">Dừng phát</button>
+    <label class="config-label">Mức giọng phát ở loa xe<input id="speakerLevel" type="range" min="10" max="100" value="65"></label>
     <label class="config-label">Độ nhạy micro xe<select id="micLevel" class="config-input">
       <option value="1">Thấp · giảm rè</option><option value="2">Vừa</option><option value="3">Cao</option>
     </select></label>
@@ -518,6 +527,15 @@ registerProcessor('car-sound',CarSound);
       else if (notAhead) $(id).textContent = 'ĐANG QUÉT';
       else displayDistance(id, d[i]);
     }
+    const bat = Number(data.bat);
+    $('vBat').textContent = Number.isFinite(bat) && bat >= 9 && bat <= 13 ? bat.toFixed(2) + ' V' : '-- V';
+    const pct = Number(data.batp);
+    const pctValid = Number.isFinite(pct) && pct >= 0 && Number.isFinite(bat) && bat >= 9 && bat <= 13;
+    $('vBatBar').style.width = pctValid ? Math.max(0, Math.min(100, pct)) + '%' : '0%';
+    if (pctValid && pct <= 20) $('vBatBar').style.background = 'var(--red-neon)';
+    else $('vBatBar').style.background = 'var(--green-neon)';
+    $('vSpeed').textContent = data.spd != null && Number.isFinite(Number(data.spd)) ? String(data.spd)  : '--';
+    $('vRssi').textContent = Number.isFinite(Number(data.rssi)) ? Number(data.rssi) + ' dBm' : '-- dBm';
     $('vStatus').textContent = (data.msg ? data.msg + " · " + (data.manualMotor || "S") + " PWM " + (data.manualPwm || 0) : "") || (data.laser === 0 ? 'LỖI SIÊU ÂM TRƯỚC' : ('Chế độ: ' + (data.mode || 'sẵn sàng')));
     if (data.msg && data.msg.startsWith('Dừng')) $('vStatus').style.color = 'var(--yellow-neon)';
     else $('vStatus').style.color = 'var(--green-neon)';
@@ -561,6 +579,7 @@ registerProcessor('car-sound',CarSound);
       if (n.laser === 0) { $('vStatus').textContent = 'LỖI: KHÔNG THẤY SIÊU ÂM TRƯỚC'; $('vStatus').style.color = 'var(--yellow-neon)'; }
       const data = await getDirectJson('/telemetry');
       updateTelemetry(data);
+      $('vRssi').textContent = n.sta ? n.rssi + ' dBm' : 'AP NỘI BỘ';
     } catch (err) {
       setBadge('MẤT KẾT NỐI DIRECT IP', false);
       enableControls(false);
@@ -808,6 +827,7 @@ registerProcessor('car-sound',CarSound);
   document.querySelectorAll('[data-speed]').forEach(btn => btn.addEventListener('click', () => {
     publishCmd('speed', btn.dataset.speed);
     document.querySelectorAll('[data-speed]').forEach(b => b.classList.toggle('active', b === btn));
+    $('vSpeed').textContent = btn.dataset.speed;
     logMsg('Đặt tốc độ PWM: ' + btn.dataset.speed);
   }));
   $('estopBtn').addEventListener('click', () => {
@@ -843,6 +863,13 @@ registerProcessor('car-sound',CarSound);
     if(s.ctx)await s.ctx.close().catch(()=>{});
     await stopped;
     audioText(msg);
+  }
+  async function micPermission() {
+    try {
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      stream.getTracks().forEach(t=>t.stop());
+      audioText('Đã cho phép micro. Giữ nút nói và chờ chữ “Đang nói”.');
+    } catch (_) {audioText('Mở dashboard bằng HTTPS và cho phép Chrome dùng micro.');}
   }
   async function beginAudio(mode, playback=false) {
     if (audioSession) {await stopAudio(); if (mode==='L') return;}
@@ -939,7 +966,51 @@ registerProcessor('car-sound',CarSound);
 
     } catch (_) { /* Ignore unauthenticated or obsolete frames. */ }
   }
+  async function playSelectedFile() {
+    const file=$('audioFile').files?.[0];
+    if(!file){audioText('Chọn một file âm thanh trước.');return;}
+    if(file.size>10*1024*1024){audioText('File quá lớn. Chọn file dưới 10 MB.');return;}
+    let decoded;
+    try {
+      const ctx=new AudioContext();
+      try {decoded=await ctx.decodeAudioData(await file.arrayBuffer());}
+      finally {await ctx.close();}
+    } catch (_) {audioText('Điện thoại không đọc được định dạng file này. Thử MP3 hoặc WAV.');return;}
+    const length=Math.ceil(decoded.duration*16000);
+    if(!length || decoded.duration>30){audioText('Chọn bản ghi dài tối đa 30 giây.');return;}
+    if(audioSession)await stopAudio();
+    talkHeld=true;
+    await beginAudio('T',true);
+    const s=audioSession;
+    if(!s || s.mode!=='T') {talkHeld=false;return;}
+    s.playback=true;
+    let sample=0,failed=false;
+    const channel=decoded.getChannelData(0),gain=Number($('speakerLevel').value)/100;
+    audioText('Đang kết nối loa xe…');
+    while(audioSession===s && s.started && sample<length && client?.connected) {
+      const pcm=new Int16Array(512);
+      for(let i=0;i<512 && sample<length;i++,sample++) {
+        const position=sample*decoded.sampleRate/16000;
+        const at=Math.floor(position),fraction=position-at;
+        const first=channel[Math.min(at,channel.length-1)]||0;
+        const second=channel[Math.min(at+1,channel.length-1)]||0;
+        const value=(first+(second-first)*fraction)*gain;
+        const peak=Math.abs(value);
+        const limited=peak<=0.8?peak:0.8+0.2*Math.tanh((peak-0.8)/0.2);
+        pcm[i]=Math.round(Math.sign(value)*limited*32767);
+      }
+      try {await audioSend(s,'V',pcm.buffer);}
+      catch(_){failed=true;break;}
+      if(audioSession!==s)break;
+      await new Promise(resolve=>setTimeout(resolve,32));
+    }
+    if(audioSession===s)await stopAudio(failed?'Mất kết nối khi phát.':'Đã phát xong bản ghi.');
+    talkHeld=false;
+  }
+  $('playAudioFile').onclick=playSelectedFile;
+  $('stopAudioFile').onclick=()=>{talkHeld=false;stopAudio('Đã dừng phát.');};
   $('micLevel').onchange=()=>{if(audioSession?.confirmed)audioSend(audioSession,$('micLevel').value).catch(()=>{});};
+  $('audioPermission').onclick=micPermission;
   $('listenCar').onclick=()=>beginAudio('L');
   const talkButton=$('talkCar');
   talkButton.oncontextmenu=e=>e.preventDefault();
