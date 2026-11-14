@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>ESP32 CAR PRO - Dashboard Camera + Control v1.8.0 MJPEG</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg-main:#0b0f19;--card-bg:#131b2e;--card-border:#1e2d4a;--cyan-neon:#00f2fe;--green-neon:#00ff88;--purple-neon:#a855f7;--red-neon:#ff0055;--yellow-neon:#ffca28;--text-main:#f1f5f9;--text-sub:#7183a5}
+*{box-sizing:border-box;margin:0;padding:0;user-select:none;-webkit-user-select:none}body{font-family:'Rajdhani',sans-serif;background:radial-gradient(ellipse at top,#101d33 0,var(--bg-main) 55%);color:var(--text-main);min-height:100vh;padding:15px;display:flex;flex-direction:column;align-items:center}button,input{font:inherit}button{touch-action:manipulation}button:disabled{opacity:.42;cursor:not-allowed!important;filter:grayscale(.5)}
+.header{width:100%;max-width:1200px;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;margin-bottom:15px;background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;box-shadow:0 0 15px #00f2fe18}.header-title{font-family:'Orbitron',sans-serif;font-size:clamp(16px,2.5vw,22px);font-weight:900;color:var(--cyan-neon);display:flex;align-items:center;gap:10px;text-shadow:0 0 10px #00f2fe80}.status-badge{font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;padding:7px 13px;border-radius:20px;background:#ff005526;color:var(--red-neon);border:1px solid var(--red-neon);white-space:nowrap}.status-badge.connected{background:#00ff8826;color:var(--green-neon);border-color:var(--green-neon);box-shadow:0 0 10px #00ff8840}
+.dashboard-grid{width:100%;max-width:1200px;display:grid;grid-template-columns:320px minmax(0,1fr);gap:15px}.card,.config-card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:14px;padding:15px;margin-bottom:15px;box-shadow:0 8px 20px #0006;min-width:0}.card-header{font-family:'Orbitron',sans-serif;font-size:13px;font-weight:700;color:var(--cyan-neon);margin-bottom:15px;display:flex;align-items:center;gap:8px;letter-spacing:.35px}.mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.btn-mode{font-family:'Orbitron',sans-serif;font-size:10px;font-weight:700;padding:12px 6px;background:#162032;border:1px solid var(--card-border);color:var(--text-main);border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;transition:background .15s,border-color .15s}.btn-mode:active,.btn-mode.active{background:#00f2fe26;border-color:var(--cyan-neon);color:var(--cyan-neon);box-shadow:0 0 10px #00f2fe35}.btn-mode.purple.active{background:#a855f733;border-color:var(--purple-neon);color:#d8b4fe}.btn-mode.green.active{background:#00ff8822;border-color:var(--green-neon);color:var(--green-neon)}
+.dpad-container{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,52px);gap:8px;width:min(100%,210px);margin:10px auto 15px}.btn-drive{background:#1a263b;border:1px solid #2a3c5a;border-radius:10px;color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .1s,transform .1s;touch-action:none;-webkit-tap-highlight-color:transparent}.btn-drive:active,.btn-drive.active{background:var(--cyan-neon);color:#000;box-shadow:0 0 12px #00f2fe80;transform:scale(.96)}.btn-drive.stop{background:#ffb020;border-color:#ffb020;color:#000}.speed-flex{display:flex;gap:7px;margin-top:12px;background:#0d1424;padding:6px;border-radius:10px}.btn-speed{flex:1;font-family:'Orbitron',sans-serif;font-size:10px;font-weight:700;padding:9px 2px;background:transparent;border:1px solid transparent;color:var(--text-sub);border-radius:6px;cursor:pointer}.btn-speed.active{background:var(--cyan-neon);color:#000;box-shadow:0 0 10px #00f2fe80}.btn-estop{width:100%;margin-top:12px;padding:12px;font-family:'Orbitron',sans-serif;font-size:12px;font-weight:900;background:linear-gradient(135deg,#ff0055,#ff2a00);color:#fff;border:0;border-radius:10px;cursor:pointer;box-shadow:0 0 15px #ff005566}.btn-estop:active{transform:scale(.98)}
+.car-map-wrapper{position:relative;width:100%;height:280px;background:#0d1322;border-radius:12px;border:1px dashed #1a2942;display:flex;align-items:center;justify-content:center;margin-bottom:14px;overflow:hidden}.car-body{width:88px;height:140px;border:2px solid var(--cyan-neon);border-radius:18px;position:relative;box-shadow:0 0 15px #00f2fe33;display:flex;flex-direction:column;justify-content:space-between;align-items:center;padding:9px 0;background:#00f2fe08;z-index:1}.car-body:before,.car-body:after{content:'';position:absolute;width:104px;height:20px;background:#25354e;border-radius:4px;z-index:-1}.car-body:before{top:17px}.car-body:after{bottom:17px}.car-label{font-family:'Orbitron',sans-serif;font-size:9px;font-weight:700;color:var(--cyan-neon)}.car-icon{font-size:18px}.sensor-box{position:absolute;background:#141f33eF;border:1px solid var(--cyan-neon);border-radius:8px;padding:6px 8px;text-align:center;min-width:88px;max-width:115px;box-shadow:0 0 10px #00f2fe26}.sensor-box .title{font-family:'Orbitron',sans-serif;font-size:8px;font-weight:700;color:var(--text-sub)}.sensor-box .value{font-family:'Orbitron',sans-serif;font-size:13px;font-weight:900;color:var(--green-neon);margin-top:3px}.pos-sonar-front{top:10px;left:50%;transform:translateX(-50%)}.pos-sonar-rear{bottom:10px;left:50%;transform:translateX(-50%)}.pos-front-left{top:53px;left:10px}.pos-front-right{top:53px;right:10px}.pos-rear-left{bottom:53px;left:10px}.pos-rear-right{bottom:53px;right:10px}
+.telemetry-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:14px}.tele-card{background:#0d1424;border:1px solid var(--card-border);border-radius:10px;padding:10px;min-width:0}.tele-card .label{font-family:'Orbitron',sans-serif;font-size:8px;font-weight:700;color:var(--text-sub);line-height:1.4}.tele-card .val{font-family:'Orbitron',sans-serif;font-size:14px;font-weight:900;color:var(--cyan-neon);margin-top:5px;overflow-wrap:anywhere}.battery-bar{width:100%;height:4px;background:#1e2d4a;border-radius:2px;margin-top:6px;overflow:hidden}.battery-fill{height:100%;width:0;background:var(--green-neon);border-radius:2px;transition:width .2s}.console-log{width:100%;height:100px;background:#050811;border:1px solid #142035;border-radius:8px;padding:8px 10px;font-family:monospace;font-size:10px;color:var(--green-neon);overflow-y:auto;line-height:1.5;overflow-wrap:anywhere}.config-card{margin-top:0}.config-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.config-input{width:100%;background:#050811;border:1px solid var(--card-border);border-radius:6px;padding:9px 10px;color:white;font-family:inherit;font-size:13px;margin-top:5px;min-width:0}.config-label{display:block;font-size:11px;color:var(--text-sub);margin-top:4px}.btn-connect{width:100%;margin-top:10px;padding:10px;background:#16a34a;color:white;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;border:0;border-radius:8px;cursor:pointer}.auto-panel{background:#0d1424;border:1px solid #25405a;border-radius:10px;padding:12px;margin-bottom:14px}
+.auto-rows{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.auto-row{min-width:0}.auto-row label{font-weight:700;color:var(--cyan-neon);font-size:12px;display:flex;justify-content:space-between;gap:6px}
+.auto-row input[type=range]{width:100%;accent-color:var(--cyan-neon);margin-top:8px}
+.auto-info{font-family:'Rajdhani',sans-serif;font-weight:600;font-size:12px;color:var(--text-main);line-height:1.5;margin:8px 0}
+.auto-save{background:#076f92;border:0;color:#fff;border-radius:7px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;min-height:34px}
+@media(max-width:540px){.auto-rows{grid-template-columns:1fr}}
+.note{color:var(--text-sub);font-size:11px;line-height:1.5;margin-top:9px}.warning{display:none;color:var(--yellow-neon);font-size:11px;line-height:1.45;margin-top:8px}.warning.show{display:block}
+
+.cam-frame{width:100%;min-height:180px;max-height:420px;aspect-ratio:4/3;background:#050811;border:1px solid var(--card-border);border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--text-sub);text-align:center}.cam-frame img{width:100%;height:100%;max-height:420px;object-fit:contain}.cam-tools{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}.cam-button{padding:10px 14px;background:#16a34a;color:white;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;border:0;border-radius:8px;cursor:pointer}.cam-status{font-size:12px;color:var(--text-sub);margin-top:8px;line-height:1.45}
+
+@media(max-width:900px){.dashboard-grid{grid-template-columns:1fr}.left-col{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}.left-col .card{height:fit-content}.right-col{min-width:0}}@media(max-width:600px){body{padding:8px}.header{padding:10px}.left-col{grid-template-columns:1fr}.telemetry-grid{grid-template-columns:1fr 1fr}.car-map-wrapper{height:270px}.sensor-box{min-width:78px;padding:5px 6px}.sensor-box .title{font-size:7px}.sensor-box .value{font-size:12px}.pos-front-left,.pos-rear-left{left:5px}.pos-front-right,.pos-rear-right{right:5px}.config-grid{grid-template-columns:1fr}.header-title{font-size:15px}.status-badge{font-size:9px;padding:6px 8px}}
+</style>
+</head>
+<body>
+<div class="header"><div class="header-title">🚀 ESP32 CAR PRO <span style="font-size:9px;color:var(--text-sub);font-weight:500">v1.8.0 MJPEG</span></div><div id="connBadge" class="status-badge">● CHƯA KẾT NỐI</div></div>
+<div class="dashboard-grid">
+  <div class="left-col">
+    <div class="card"><div class="card-header">🎮 CHẾ ĐỘ VẬN HÀNH</div><div class="mode-grid">
+<span>Lái tay · Xoay D2</span>
+    </div><div id="modeWarning" class="warning"></div></div>
+    <div class="card"><div class="card-header">🕹️ BẢNG ĐIỀU KHIỂN LÁI</div><div class="dpad-container">
+      <div></div><button id="btnF" class="btn-drive" data-drive="F" aria-label="Tiến">▲</button><div></div>
+      <button id="btnL" class="btn-drive" data-drive="L" aria-label="Trái">◀</button><button id="btnStop" class="btn-drive stop" data-drive="S" aria-label="Dừng">■</button><button id="btnR" class="btn-drive" data-drive="R" aria-label="Phải">▶</button>
+      <div></div><button id="btnB" class="btn-drive" data-drive="B" aria-label="Lùi">▼</button><div></div>
+    </div><div class="speed-flex"><button class="btn-speed active" data-speed="80">D1 (80)</button><button class="btn-speed" data-speed="180">D2 (180)</button><button class="btn-speed" data-speed="255">D3 (255)</button></div><button id="estopBtn" class="btn-estop">🚨 DỪNG KHẨN CẤP</button>
+    <p class="note">Giữ để chạy, nhả để dừng. Lệnh được nhắc lại mỗi 180 ms qua cả Direct IP và MQTT; ESP32 có watchdog dừng sau 450 ms. Phanh 5 cm chỉ hỗ trợ, không thay thế người giám sát.</p>
+  </div>
+  </div><!-- /left-col: fix desktop two-column layout -->
+  <div class="right-col">
+  <div class="card"><div class="card-header">📷 GIÁM SÁT CAMERA + ĐIỀU KHIỂN XE</div>
+    <div class="cam-frame"><img id="camImage" alt="Khung hình ESP32-CAM" hidden><span id="camPlaceholder">Bấm BẬT CAMERA để xem từ xa</span></div>
+    <div class="cam-tools" style="margin-top:10px">
+
+      <button id="camToggle" class="cam-button" type="button">📷 BẬT CAMERA</button>
+    </div>
+    <label>Độ phân giải <select id="remoteSize"><option value="160" selected>160 × 120 · Ít trễ</option><option value="320">320 × 240 · Cân bằng</option><option value="640">640 × 480 · Rõ</option></select></label> <button id="forgetKey">Đổi mật khẩu</button> <button id="camCheck" class="cam-button" type="button" style="margin-top:8px">Kiểm tra camera</button>
+    <div><h3>Canh gác và gửi ảnh qua email</h3>
+    <button class="cam-button" id="armEmail">Bật canh gác</button>
+    <button class="cam-button" id="disarmEmail">Tắt canh gác</button>
+    <p id="guardStatus" role="status">Đang đọc từ camera…</p>
+    <p id="guardReply" role="status"></p></div>
+    <p id="camDiagnostic" class="cam-status" role="status"></p>
+    <div id="camStatus" class="cam-status" role="status">Camera đã tắt.</div>
+  </div>
+  <div class="card"><div class="card-header">🗺️ SƠ ĐỒ KHOẢNG CÁCH CẢM BIẾN</div><div class="car-map-wrapper">
+    <div class="car-body"><span class="car-label">FRONT</span><span class="car-icon">🚘</span><span class="car-label">REAR</span></div>
+    <div class="sensor-box pos-sonar-front"><div class="title">SIÊU ÂM TRƯỚC</div><div id="vFront" class="value">-- CM</div></div>
+    <div class="sensor-box pos-front-left"><div class="title">TRÁI</div><div id="vFL" class="value">-- CM</div></div>
+    <div class="sensor-box pos-front-right"><div class="title">PHẢI</div><div id="vFR" class="value">-- CM</div></div>
+    <div class="sensor-box pos-sonar-rear"><div class="title">SIÊU ÂM SAU</div><div id="vBack" class="value">-- CM</div></div>
+  </div>
+<p class="note">N/A = chưa đo được. CŨ = số đo chưa cập nhật.</p>
+  <div class="telemetry-grid" style="grid-template-columns:1fr">
+    <div class="tele-card"><div class="label">TRẠNG THÁI XE</div><div id="vStatus" class="val" style="color:var(--yellow-neon);font-size:12px">Đang chờ...</div></div>
+  </div><div id="logConsole" class="console-log">[SYSTEM] ESP32 CAR PRO Dashboard Camera + Control • v1.8.0 MJPEG sẵn sàng.</div></div>
+  <div class="card" id="cryCard">
+    <div class="card-header">👶 E-NANNY · HO / KHÓC / TIẾNG NỀN</div>
+    <p id="cryStatus" role="status">Chưa nhận dữ liệu E-Nanny từ xe.</p>
+    <div class="telemetry-grid">
+      <div class="tele-card"><div class="label">HO · COUGH</div><div class="val" id="cryCough">--</div></div>
+      <div class="tele-card"><div class="label">KHÓC · CRY</div><div class="val" id="cryValue">--</div></div>
+      <div class="tele-card"><div class="label">TIẾNG NỀN · NOISE</div><div class="val" id="cryNoise">--</div></div>
+    </div>
+    <div class="config-grid">
+      <label class="config-label">Ngưỡng điểm tiếng khóc (0,50–0,99)<input id="cryCut" class="config-input" type="number" min="0.50" max="0.99" step="0.01" value="0.75"></label>
+    </div>
+    <button id="cryEnable" type="button">Bật giám sát tiếng khóc</button>
+    <button id="cryDisable" type="button">Tắt giám sát</button>
+    <button id="crySaveCut" type="button">Lưu ngưỡng tiếng khóc</button>
+    <p id="cryMailStatus" class="note">Gmail dùng URL và IOT_KEY đã nạp vào ESP32.</p>
+    <p class="note">Điểm của mô hình thử nghiệm, không phải độ chính xác thực tế. Nhận diện tiếp tục khi dashboard đóng. Tạm dừng khi xe chạy/loa xe phát; có khoảng nghỉ trong lúc xử lý từng đoạn. Chỉ gửi Gmail cho nhãn khóc; chống lặp cùng đợt và cách tối thiểu 60 giây.</p>
+  </div>
+  <div class="card" id="climateCard">
+    <div class="card-header">🌡️ NHIỆT ĐỘ & ĐỘ ẨM PHÒNG</div>
+    <div class="telemetry-grid">
+      <div class="tele-card"><div class="label">NHIỆT ĐỘ</div><div id="shtTemp" class="val">-- °C</div></div>
+      <div class="tele-card"><div class="label">ĐỘ ẨM</div><div id="shtHumidity" class="val">-- %</div></div>
+    </div>
+    <p class="note">Đo gần nhất: <b id="shtTime">Chưa có dữ liệu</b>. Cảm biến gắn trên xe sẽ đo tại vị trí xe đang đứng.</p>
+    <p class="note">Báo khi nằm ngoài ngưỡng liên tục trong thời gian đặt dưới đây.</p>
+    <div class="config-grid">
+      <label class="config-label">Nhiệt độ thấp nhất (°C)<input id="shtTmin" class="config-input" type="number" step="0.5" value="20"></label>
+      <label class="config-label">Nhiệt độ cao nhất (°C)<input id="shtTmax" class="config-input" type="number" step="0.5" value="32"></label>
+      <label class="config-label">Độ ẩm thấp nhất (%)<input id="shtHmin" class="config-input" type="number" step="1" value="40"></label>
+      <label class="config-label">Độ ẩm cao nhất (%)<input id="shtHmax" class="config-input" type="number" step="1" value="80"></label>
+      <label class="config-label">Thời gian vượt ngưỡng (giây)<input id="shtDelay" class="config-input" type="number" min="0" max="3600" step="5" value="30"></label>
+    </div>
+    <p id="shtAlert" role="status" class="note" style="font-weight:700;color:var(--green-neon)">Chưa nhận dữ liệu cảm biến.</p>
+    <div class="config-grid">
+      <label class="config-label">URL ứng dụng web SHT (/exec)<input id="shtCloudUrl" class="config-input" type="url" placeholder="https://script.google.com/macros/s/.../exec"></label>
+      <label class="config-label">IOT_KEY của Apps Script SHT<input id="shtCloudKey" class="config-input" type="password" autocomplete="off" placeholder="Giống khóa trong SHTTask.h"></label>
+    </div>
+    <button id="shtSaveCloud" type="button" class="btn">Lưu ngưỡng gửi Gmail</button>
+    <p id="shtCloudStatus" class="note" role="status">Sau khi chỉnh ngưỡng, bấm Lưu ngưỡng gửi Gmail. Trang xác nhận sẽ mở ở tab mới.</p>
+    <p class="note">Chỉ khi trang xác nhận báo Đã lưu ngưỡng Gmail, máy chủ mới dùng ngưỡng mới. Xe vẫn gửi cảnh báo khi đóng dashboard nếu có nguồn và Wi-Fi Internet. Khóa không được lưu trên trình duyệt.</p>
+  </div>
+  <div class="card">
+    <div class="card-header">GIÁM SÁT HỆ THỐNG</div>
+    <p id="iotVehicle">Xe — chưa nhận dữ liệu</p>
+    <p id="iotCamera">Camera — chưa xác nhận kết nối</p>
+    <p id="iotMail">Email — chưa đọc trạng thái</p>
+    <button id="saveSnapshot" class="cam-button" type="button">Lưu ảnh đang xem</button>
+    <p id="snapshotResult" role="status"></p>
+    <details><summary>Nhật ký trên thiết bị này</summary>
+      <p>Nhật ký ghi khi trang đang mở, tối đa 100 mục cho mỗi topic xe.</p>
+      <button id="exportJournal" type="button">Tải nhật ký JSON</button>
+      <ol id="iotJournal"></ol>
+    </details>
+  </div>
+  <div class="config-card"><div class="card-header">Âm thanh trên xe</div>
+    <label class="config-label">Mã âm thanh xe · 8 ký tự hoặc khóa cũ<input id="audioKey" maxlength="32" autocapitalize="characters" class="config-input" type="password" autocomplete="off" spellcheck="false"></label>
+    <button class="cam-button" id="listenCar">Nghe từ xe / Dừng</button>
+    <button class="cam-button" id="talkCar" style="touch-action:none;user-select:none">Giữ để nói</button>
+<label class="config-label">Mức giọng phát ở loa xe<input id="speakerLevel" type="range" min="10" max="100" value="65"></label>
+    <label class="config-label">Độ nhạy micro xe<select id="micLevel" class="config-input">
+      <option value="1">Thấp · giảm rè</option><option value="2">Vừa</option><option value="3">Cao</option>
+    </select></label>
+    <p class="note" role="status" id="audioStatus">Dừng xe rồi chọn nghe hoặc nói.</p>
+  </div>
+  <div class="config-card"><div class="card-header">⚙️ CẤU HÌNH KẾT NỐI</div><p class="note" style="margin:0 0 8px">Trang mở từ IP của ESP32 sẽ tự dùng Direct IP (cùng Wi-Fi). Nếu mở file này riêng trên laptop hoặc từ website khác, trang dùng MQTT qua Internet.</p>
+    <div class="config-grid">
+      <label class="config-label">Direct IP<input id="cfgIp" class="config-input" type="text" value="http://192.168.4.1"></label>
+      <label class="config-label">MQTT Broker<input id="cfgBroker" class="config-input" type="text" value="broker.hivemq.com"></label>
+      <label class="config-label" style="grid-column:1/-1">Topic xe (có thể nhập xeBD2A58)<input id="cfgTopic" class="config-input" type="text" value="xeBD2A58" placeholder="xeBD2A58"></label>
+    </div><button id="connectBtn" class="btn-connect">📡 KẾT NỐI / KIỂM TRA</button>
+    <p class="note">Xe cần vào Wi-Fi có Internet để dùng MQTT. Nếu vẫn có thiết bị nối vào Wi-Fi ESP32_CAR, firmware có thể tạm ngừng MQTT; hãy cho laptop và xe cùng dùng Wi-Fi nhà/hotspot. Topic gốc phải khớp <b>topicBase</b> tại <b>http://IP-XE/netinfo</b>. Chỉ báo MQTT đã kết nối broker chưa đủ để kết luận xe online.</p>
+     <p id="networkInfo" class="note" aria-live="polite">Đang chờ thông tin mạng và trạng thái xe...</p>
+  </div>
+</div></div>
+<script type="text/plain" id="audio-worklet">
+class CarSound extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    this.mode=options.processorOptions.mode;
+    this.chunk=new Int16Array(512);this.used=0;
+    this.sum=0;this.weight=0;this.ratio=sampleRate/16000;
+    this.queue=[];this.offset=0;this.total=0;this.playing=false;
+    this.phase=0;this.current=0;this.following=0;this.level=0;this.last=0;
+    this.port.onmessage=({data})=>{
+      if(this.mode==='T')return;
+      const pcm=new Int16Array(data);
+      this.queue.push(pcm);this.total+=pcm.length;
+      if(this.total>4096) {
+        this.queue=[pcm];this.offset=0;this.total=pcm.length;
+        this.playing=false;this.phase=0;this.level=0;this.last=0;
+      }
+    };
+  }
+  take() {
+    if(!this.total)return null;
+    const head=this.queue[0],v=head[this.offset++]/32768;
+    --this.total;
+    if(this.offset===head.length){this.queue.shift();this.offset=0;}
+    return v;
+  }
+  process(inputs,outputs) {
+    if(this.mode==='T') {
+      const input=inputs[0]?.[0];
+      if(input)for(const value of input) {
+        let left=1;
+        while(left>0.000001) {
+          const part=Math.min(left,this.ratio-this.weight);
+          this.sum+=value*part;this.weight+=part;left-=part;
+          if(this.weight>=this.ratio-0.000001) {
+            this.chunk[this.used++]=Math.round(Math.max(-1,Math.min(1,this.sum/this.ratio))*32767);
+            this.sum=this.weight=0;
+            if(this.used===512) {
+              this.port.postMessage(this.chunk.buffer,[this.chunk.buffer]);
+              this.chunk=new Int16Array(512);this.used=0;
+            }
+          }
+        }
+      }
+      return true;
+    }
+    const out=outputs[0]?.[0];
+    if(!out)return true;
+    if(!this.playing && this.total>=1536) {
+      this.current=this.take();this.following=this.take();
+      this.phase=0;this.playing=true;
+    }
+    for(let i=0;i<out.length;i++) {
+      if(this.playing) {
+        const v=this.current+(this.following-this.current)*this.phase;
+        this.level+=(1-this.level)*0.012;
+        out[i]=v*this.level;this.last=out[i];
+        this.phase+=16000/sampleRate;
+        while(this.phase>=1 && this.playing) {
+          this.phase-=1;
+          this.current=this.following;
+          const next=this.take();
+          if(next===null){this.playing=false;this.level=0;}
+          else this.following=next;
+        }
+      } else {this.last*=0.99;out[i]=this.last;}
+    }
+    return true;
+  }
+}
+registerProcessor('car-sound',CarSound);
+</script>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  let client = null;
+  let topicBase = '';
+  let transport = 'none'; // direct | mqtt
+  let activeDrivePointerId = null;
+  let activeDriveSource = null;
+  let activeDriveCommand = null;
+  let driveHeartbeatTimer = null;
+  let statusTimer = null;
+  let mqttWatchdogTimer = null;
+  let directPollBusy = false;
+  let lastTelemetryAt = 0;
+  let lastVehicleOnline = false;
+  let remoteAllowed = null;
+  let anotherTransportDriving = false;
+  let mqttTransportUp = false;
+  let directLastLatencyMs = null;
+  let firmwareNoticeShown = false;
+  let lastDeviceUptime = null;
+  let autoTuneDirty = false;
+  let autoTunePending = null;
+  let autoTuneSentAt = 0;
+  const TELEMETRY_TIMEOUT_MS = 5000;
+  const DRIVE_HEARTBEAT_MS = 180; // nhỏ hơn DEADMAN_MS=600 trong firmware
+
+  const journalPrefix = 'car-iot-events-v1:';
+  let journalTopic = '', journal = [];
+  let cameraSeenAt = 0, vehicleSeenAt = 0;
+  let observedGuard = null, observedMail = null, observedSent = null;
+  let cameraPollBusy = false, observedVehicleOnline = null;
+
+  function renderJournal(){
+    const list=$('iotJournal');
+    list.replaceChildren();
+    for(const entry of journal.slice(-15).reverse()){
+      const item=document.createElement('li');
+      item.textContent=new Date(entry.at).toLocaleString('vi-VN')+' — '+entry.message;
+      list.appendChild(item);
+    }
+  }
+  function selectJournal(){
+    const topic=baseTopic();
+    if(journalTopic===topic)return;
+    journalTopic=topic; journal=[];
+    observedGuard=null; observedMail=null; observedSent=null;
+    cameraSeenAt=0; vehicleSeenAt=0; observedVehicleOnline=null;
+    try{
+      const saved=JSON.parse(localStorage.getItem(journalPrefix+topic)||'[]');
+      if(Array.isArray(saved))journal=saved.filter(e=>e && typeof e.at==='number' && typeof e.message==='string').slice(-100);
+    }catch{}
+    renderJournal();
+  }
+  function recordEvent(message){
+    selectJournal();
+    journal.push({at:Date.now(),message:String(message)});
+    journal=journal.slice(-100);
+    try{localStorage.setItem(journalPrefix+journalTopic,JSON.stringify(journal));}catch{}
+    renderJournal();
+  }
+  function observeCamera(state,last,mail){
+    selectJournal();
+    cameraSeenAt=Date.now();
+    if(observedGuard!==null && observedGuard!==state){
+      recordEvent('Camera xác nhận trạng thái canh gác: '+({on:'đang bật',off:'đã tắt',waiting:'đang chờ PIR ổn định'}[state]||state));
+    }
+    const sent=Number(last);
+    if(Number.isFinite(sent) && sent>0 && observedSent!==sent){
+      recordEvent('Camera báo gửi email thành công lúc '+new Date(sent*1000).toLocaleString('vi-VN'));
+    }
+    if(mail==='3' && observedMail!=='3')recordEvent('Camera báo lỗi gửi email.');
+    observedGuard=state; observedMail=mail; observedSent=sent;
+    $('iotMail').textContent=mail==='1'?'Email — đang gửi':mail==='3'?'Email — lần gửi gần nhất lỗi':
+      sent>0?'Email — camera báo gửi thành công lúc '+new Date(sent*1000).toLocaleString('vi-VN'):'Email — chưa có lần gửi thành công';
+  }
+  function downloadBlob(blob,name){
+    const url=URL.createObjectURL(blob);
+    const anchor=document.createElement('a');
+    anchor.href=url; anchor.download=name; document.body.appendChild(anchor);
+    anchor.click(); anchor.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),10000);
+  }
+  $('saveSnapshot').onclick=async()=>{
+    if(!camOn || !imageUrl || !camLastFrameAt || Date.now()-camLastFrameAt>2000){
+      $('snapshotResult').textContent='Bật camera và chờ ảnh mới trước khi lưu.';return;
+    }
+    try{
+      const response=await fetch(imageUrl);
+      if(!response.ok)throw Error('Ảnh đã thay đổi, hãy thử lại.');
+      downloadBlob(await response.blob(),'camera-'+Date.now()+'.jpg');
+      $('snapshotResult').textContent='Đã gửi ảnh cho trình duyệt tải xuống.';
+      recordEvent('Người dùng yêu cầu lưu ảnh camera đang xem.');
+    }catch(error){$('snapshotResult').textContent=error.message;}
+  };
+  $('exportJournal').onclick=()=>{
+    selectJournal();
+    downloadBlob(new Blob([JSON.stringify({topic:journalTopic,exportedAt:new Date().toISOString(),events:journal},null,2)],{type:'application/json'}),'nhat-ky-xe.json');
+  };
+  setInterval(()=>{
+    selectJournal();
+    const vehicleOnline=vehicleSeenAt>0 && Date.now()-vehicleSeenAt<TELEMETRY_TIMEOUT_MS;
+    if(observedVehicleOnline!==vehicleOnline && (observedVehicleOnline!==null || vehicleOnline)){
+      recordEvent(vehicleOnline?'Xe đã gửi dữ liệu mới.':'Không nhận dữ liệu xe trong 5 giây.');
+    }
+    observedVehicleOnline=vehicleOnline;
+    $('iotVehicle').textContent=vehicleSeenAt?'Xe — dữ liệu gần nhất '+Math.floor((Date.now()-vehicleSeenAt)/1000)+' giây trước'+(vehicleOnline?'':' · chưa xác nhận online'):'Xe — chưa nhận dữ liệu';
+    $('iotCamera').textContent=cameraSeenAt?'Camera — phản hồi gần nhất '+Math.floor((Date.now()-cameraSeenAt)/1000)+' giây trước':'Camera — chưa xác nhận kết nối';
+  },1000);
+  setInterval(async()=>{
+    if(document.hidden || camOn || cameraPollBusy || !key || !client?.connected)return;
+    cameraPollBusy=true;
+    try{await requestCamera('status');}catch{}finally{cameraPollBusy=false;}
+  },30000);
+
+  function logMsg(msg) {
+    const box = $('logConsole');
+    const line = document.createElement('div');
+    line.textContent = '[' + new Date().toLocaleTimeString() + '] ' + String(msg);
+    box.appendChild(line);
+    while (box.children.length > 60) box.removeChild(box.firstElementChild);
+    box.scrollTop = box.scrollHeight;
+  }
+  function setBadge(text, connected) {
+    $('connBadge').textContent = '● ' + text;
+    $('connBadge').classList.toggle('connected', !!connected);
+  }
+  function enableControls(enabled) {
+    const canDrive = !!enabled && !anotherTransportDriving && (transport !== 'mqtt' || remoteAllowed !== false);
+    document.querySelectorAll('[data-drive],[data-speed],[data-mode]').forEach(b => { b.disabled = !canDrive; });
+    // Không tắt E-STOP trong MQTT nếu remote=0; firmware luôn nhận E-STOP.
+    $('estopBtn').disabled = !enabled && !(transport === 'mqtt' && mqttTransportUp);
+    if (!canDrive) clearDriveHold(false);
+  }
+  function refreshMqttPresence() {
+    if (transport !== 'mqtt') return;
+    const fresh = mqttTransportUp && lastVehicleOnline && lastTelemetryAt > 0 &&
+      Date.now() - lastTelemetryAt < TELEMETRY_TIMEOUT_MS;
+    if (fresh) setBadge(remoteAllowed === false ? 'MQTT - XE ONLINE (KHÓA ĐIỀU KHIỂN)' : 'MQTT - XE ONLINE', true);
+    else if (mqttTransportUp) setBadge('MQTT - CHỜ XE ONLINE', false);
+    enableControls(fresh);
+    if (mqttTransportUp && !fresh) $('vStatus').textContent = 'Chưa có telemetry mới từ ESP32';
+  }
+
+  function baseTopic() {
+    let t = $('cfgTopic').value.trim().replace(/^\/+|\/+$/g, '');
+    if (!t) return '';
+    if (!t.includes('/')) t = 'pbl3/' + t;
+    return t;
+  }
+  function normalizeBroker(raw) {
+    let s = raw.trim();
+    if (!s) s = 'broker.hivemq.com';
+    if (s.startsWith('ws://') || s.startsWith('wss://')) return s;
+    s = s.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    return 'wss://' + s + ':8884/mqtt';
+  }
+  function directBase() { return $('cfgIp').value.trim().replace(/\/+$/, ''); }
+  function isPrivateIp(host) {
+    return /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2[0-9]|3[01])\./.test(host) || host === 'localhost';
+  }
+  // Auto-fill Direct IP only when the page is served on the ESP32's normal HTTP port.
+  // A laptop-hosted page on port 8000 must use MQTT, even when its IP is private.
+  if (window.location.protocol === 'http:' && isPrivateIp(window.location.hostname) &&
+      (window.location.port === '' || window.location.port === '80')) {
+    $('cfgIp').value = window.location.origin;
+  }
+  function isSameOriginDirect() { return false; }
+  function fetchDirect(path, options) {
+    return fetch(directBase() + path, Object.assign({cache:'no-store'}, options || {}));
+  }
+  async function getDirectJson(path, timeoutMs = 2500) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetchDirect(path, {signal:controller.signal});
+      if (!response.ok) throw new Error('HTTP ' + response.status + ' (' + path + ')');
+      return await response.json();
+    } finally { clearTimeout(timeout); }
+  }
+  function publishCmd(path, payload) {
+    if (transport === 'direct') {
+      if (path === 'drive') {
+        fetchDirect('/cmd?val=' + encodeURIComponent(payload)).catch(() => {});
+      } else if (path === 'cry' || path === 'crycut') {
+        const form=new URLSearchParams();form.set(path==='cry'?'on':'cut',String(payload));
+        fetchDirect('/cry',{method:'POST',body:form}).then(r=>{if(!r.ok)logMsg('Không lưu được E-Nanny: HTTP '+r.status);}).catch(e=>logMsg(e.message));
+      } else if (path === 'speed') {
+        fetchDirect('/speed?val=' + encodeURIComponent(payload)).then(r => {if (!r.ok) logMsg('Đổi tốc độ bị từ chối: HTTP ' + r.status);}).catch(() => {});
+      } else if (path === 'estop') {
+        fetchDirect('/estop').then(r => {if (!r.ok) logMsg('Lỗi yêu cầu dừng HTTP ' + r.status);}).catch(() => logMsg('Không gửi được E-STOP qua Direct IP!'));
+      }
+      return;
+    }
+    if (transport !== 'mqtt' || !client || !client.connected || !topicBase) {
+      logMsg('Chưa kết nối MQTT; chưa gửi được lệnh.'); return;
+    }
+    client.publish(topicBase + '/cmd/' + path, String(payload ?? ''), {qos:0, retain:false}, err => {
+      if (err) logMsg('Lỗi gửi lệnh: ' + err.message);
+    });
+  }
+  function displayDistance(id, value) {
+    const n = Number(value);
+    $(id).textContent = Number.isFinite(n) && n > 0 ? Math.round(n) + ' CM' : 'N/A';
+    $(id).style.color = !Number.isFinite(n)||n<=0 ? 'var(--yellow-neon)' : n<=12 ? 'var(--red-neon)' : 'var(--green-neon)';
+  }
+  let climateBreachSince = 0, climateAlarmed = false, climateReceivedAt = 0;
+  function loadClimateLimits() {
+    try {
+      const saved=JSON.parse(localStorage.getItem('esp32climateLimits')||'{}');
+      for(const id of ['shtTmin','shtTmax','shtHmin','shtHmax','shtDelay']) if(saved[id]!==undefined) $(id).value=saved[id];
+    } catch(_) {}
+  }
+  $('shtCloudUrl').value=localStorage.getItem('shtCloudUrl')||'';
+  $('shtSaveCloud').addEventListener('click',()=>{
+    const ids=['shtTmin','shtTmax','shtHmin','shtHmax','shtDelay'];
+    if(ids.some(id=>!$(id).value.trim())) { $('shtCloudStatus').textContent='Điền đủ các ngưỡng và thời gian.';return; }
+    const limits={tMin:Number($('shtTmin').value),tMax:Number($('shtTmax').value),rhMin:Number($('shtHmin').value),rhMax:Number($('shtHmax').value),delayMs:Number($('shtDelay').value)*1000};
+    const url=$('shtCloudUrl').value.trim(),key=$('shtCloudKey').value;
+    if(!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url)) { $('shtCloudStatus').textContent='Điền URL Apps Script SHT đầy đủ, kết thúc /exec.';return; }
+    if(!key) { $('shtCloudStatus').textContent='Điền IOT_KEY giống Script properties và SHTTask.h.';return; }
+    if(!Object.values(limits).every(Number.isFinite)||limits.tMin< -40||limits.tMax>125||limits.tMin>=limits.tMax||limits.rhMin<0||limits.rhMax>100||limits.rhMin>=limits.rhMax||limits.delayMs<0||limits.delayMs>3600000) { $('shtCloudStatus').textContent='Ngưỡng không hợp lệ. Giá trị thấp nhất phải nhỏ hơn cao nhất.';return; }
+    localStorage.setItem('shtCloudUrl',url);
+    const form=document.createElement('form');
+    form.method='POST';form.action=url;form.target='_blank';
+    const input=document.createElement('input');input.type='hidden';input.name='payload';
+    input.value=JSON.stringify({action:'save_limits',key,limits});form.appendChild(input);
+    document.body.appendChild(form);form.submit();form.remove();
+    $('shtCloudStatus').textContent='Đã gửi yêu cầu. Xem tab xác nhận: chỉ khi báo Đã lưu ngưỡng Gmail mới lưu thành công. Nếu không thấy tab, cho phép mở tab mới rồi bấm lại.';
+  });
+  $('cryEnable').addEventListener('click',()=>publishCmd('cry','1'));
+  $('cryDisable').addEventListener('click',()=>publishCmd('cry','0'));
+  $('crySaveCut').addEventListener('click',()=>{
+    const value=Number($('cryCut').value);
+    if(!Number.isFinite(value)||value<0.5||value>0.99){logMsg('Ngưỡng tiếng khóc phải từ 0,50 đến 0,99.');return;}
+    publishCmd('crycut',String(value));
+  });
+  function cryUpdate(d){
+    const names={init_error:'Không khởi tạo được mô hình/bộ nhớ',off:'Đã tắt',paused:'Tạm dừng: xe chạy hoặc loa đang phát',model_error:'Lỗi xử lý mô hình',collecting:'Đang thu âm',analyzing:'Đang phân tích',stale:'Kết quả đã cũ',ready:'Đang giám sát'};
+    $('cryStatus').textContent=names[d.cryState]||'Firmware chưa có E-Nanny.';
+    const valid=Number(d.cryAge)>=0&&Number(d.cryAge)<10000&&d.cryState!=='model_error'&&d.cryState!=='paused'&&d.cryState!=='off';
+    for(const [id,key] of [['cryCough','cryCough'],['cryValue','cryScore'],['cryNoise','cryNoise']])$(id).textContent=valid?(Number(d[key])*100).toFixed(1)+'%':'--';
+    if(valid&&Number(d.cryScore)>Number(d.cryThreshold))$('cryStatus').textContent+=' · Nghi có tiếng khóc';
+    if(d.cryError)$('cryStatus').textContent+=' · mã lỗi '+d.cryError;
+    $('cryMailStatus').textContent='Ngưỡng đang lưu trên xe: '+(d.cryThreshold??'--')+' · Gmail: '+(Number(d.cryMailPending)?'có sự kiện chờ gửi':Number(d.cryMailHttp)===200?'đã xác nhận lần gửi gần nhất':'chưa có sự kiện gửi thành công')+' · HTTP '+(d.cryMailHttp??0);
+  }
+  function climateUpdate(data) {
+    if(Date.now()-climateReceivedAt>8000){climateBreachSince=0;climateAlarmed=false;}
+    climateReceivedAt=Date.now();
+    const ok=Number(data.shtAge)>=0 && Number(data.shtAge)<8000 && Number(data.shtOk)===1 && Number.isFinite(Number(data.tempC)) && Number.isFinite(Number(data.humidity));
+    if(!ok) { $('shtTemp').textContent='-- °C'; $('shtHumidity').textContent='-- %'; $('shtTime').textContent='Chưa có dữ liệu (kiểm tra cảm biến/đường I²C)'; $('shtAlert').textContent=data.shtState ? ('SHT3x: '+data.shtState+' · số lỗi: '+(data.shtErrors||0)+' · SDA 21 / SCL 0') : 'Firmware chưa gửi dữ liệu SHT3x. Kiểm tra đã nạp đúng bản mới.'; $('shtAlert').style.color='var(--yellow-neon)'; climateBreachSince=0; climateAlarmed=false; return; }
+    const t=Number(data.tempC), h=Number(data.humidity), age=Math.max(0,Number(data.shtAge)||0);
+    $('shtTemp').textContent=t.toFixed(1)+' °C'; $('shtHumidity').textContent=h.toFixed(1)+' %';
+    $('shtTime').textContent=new Date(Date.now()-age).toLocaleTimeString('vi-VN');
+    const n=id=>Number($(id).value), delay=Math.max(0,Math.min(3600,n('shtDelay')||0))*1000;
+    const bad=t<n('shtTmin')||t>n('shtTmax')||h<n('shtHmin')||h>n('shtHmax');
+    if(!bad){climateBreachSince=0;climateAlarmed=false;$('shtAlert').textContent='Nhiệt độ và độ ẩm đang trong ngưỡng.';$('shtAlert').style.color='var(--green-neon)';return;}
+    if(!climateBreachSince)climateBreachSince=Date.now();
+    const left=delay-(Date.now()-climateBreachSince);
+    if(left<=0){$('shtAlert').textContent='⚠ Ngoài ngưỡng: '+t.toFixed(1)+' °C, '+h.toFixed(1)+' %';$('shtAlert').style.color='var(--red-neon)';if(!climateAlarmed){logMsg('CẢNH BÁO nhiệt độ/độ ẩm đã vượt ngưỡng trong thời gian cài đặt.');climateAlarmed=true;}}
+    else{$('shtAlert').textContent='Ngoài ngưỡng; sẽ báo sau '+Math.ceil(left/1000)+' giây nếu vẫn tiếp diễn.';$('shtAlert').style.color='var(--yellow-neon)';}
+  }
+  setInterval(()=>{
+    if(climateReceivedAt && Date.now()-climateReceivedAt>8000){
+      climateBreachSince=0;climateAlarmed=false;
+      $('shtAlert').textContent='Dữ liệu cảm biến đã cũ / mất kết nối.';
+      $('shtAlert').style.color='var(--yellow-neon)';
+      $('shtTemp').textContent='-- °C';$('shtHumidity').textContent='-- %';
+    }
+  },1000);
+  loadClimateLimits();
+  for(const id of ['shtTmin','shtTmax','shtHmin','shtHmax','shtDelay']) $(id).addEventListener('change',()=>{localStorage.setItem('esp32climateLimits',JSON.stringify(Object.fromEntries(['shtTmin','shtTmax','shtHmin','shtHmax','shtDelay'].map(k=>[k,$(k).value]))));climateBreachSince=0;climateAlarmed=false;});
+  function updateTelemetry(data) {
+    if (!data || typeof data !== 'object') return;
+    selectJournal(); vehicleSeenAt=Date.now();
+    const firmwareVersion = String(data.fw || '');
+    const up = Number(data.up);
+    if (Number.isFinite(up) && up >= 0) {
+      if (lastDeviceUptime !== null && up + 2 < lastDeviceUptime) {
+        logMsg('⚠ ESP32 có thể vừa KHỞI ĐỘNG LẠI: uptime từ ' + lastDeviceUptime + 's về ' + up + 's. Kiểm tra nguồn 5V/servo và Serial Monitor.');
+      }
+      lastDeviceUptime = up;
+    }
+    if (!firmwareVersion.startsWith('1.13.1') && !firmwareNoticeShown) {
+      firmwareNoticeShown = true;
+      logMsg('Firmware trên ESP32 là ' + (firmwareVersion || 'không xác định') + '; Dashboard này được căn theo firmware 1.13.1-monitor-5cm. Kiểm tra API nếu xe đang dùng phiên bản khác.');
+    }
+    const d = Array.isArray(data.d) ? data.d : [];
+    const age = Array.isArray(data.age) ? data.age : [];
+    climateUpdate(data);
+    cryUpdate(data);
+    const shows = [
+      ['vFront',0], ['vBack',1], ['vFL',2], ['vFR',3]
+    ];
+    for (const [id,i] of shows) {
+      const stale = age[i] !== undefined && (Number(age[i]) < 0 || Number(age[i]) > 500);
+      // Laser quay ve ben trai/phai thi so do khong phai huong truoc xe.
+      const notAhead = i === 0 && data.servo !== undefined && Math.abs(Number(data.servo) - 90) > 8;
+      if (stale) $(id).textContent = 'CŨ';
+      else if (notAhead) $(id).textContent = 'ĐANG QUÉT';
+      else displayDistance(id, d[i]);
+    }
+    $('vStatus').textContent = (data.msg ? data.msg + " · " + (data.manualMotor || "S") + " PWM " + (data.manualPwm || 0) : "") || (data.laser === 0 ? 'LỖI SIÊU ÂM TRƯỚC' : ('Chế độ: ' + (data.mode || 'sẵn sàng')));
+    if (data.msg && data.msg.startsWith('Dừng')) $('vStatus').style.color = 'var(--yellow-neon)';
+    else $('vStatus').style.color = 'var(--green-neon)';
+    document.querySelectorAll('[data-speed]').forEach(b => b.classList.toggle('active', Number(b.dataset.speed) === Number(data.spd)));
+    if (data.remote !== undefined) remoteAllowed = Number(data.remote) !== 0;
+    // Ownership is only a short-lived (600ms) lease while another transport drives.
+    anotherTransportDriving = (transport === 'mqtt' && Number(data.owner) === 1) ||
+      (transport === 'direct' && Number(data.owner) === 2);
+    if (transport === 'mqtt' && remoteAllowed === false) logRemoteWarning();
+    else { remoteWarningShown = false; $('modeWarning').classList.remove('show'); }
+    if (anotherTransportDriving) {
+      $('modeWarning').textContent = 'Đường điều khiển còn lại đang giữ nút lái; chờ nhả nút hoặc bấm E-STOP.';
+      $('modeWarning').classList.add('show');
+    }
+    if (transport === 'mqtt') refreshMqttPresence();
+    else enableControls(true);
+  }
+  let remoteWarningShown = false;
+  function logRemoteWarning() {
+    $('modeWarning').textContent = 'ESP32 đang khóa điều khiển MQTT (remote=0). Hãy bật điều khiển MQTT tại trang xe trong mạng nội bộ; E-STOP vẫn dùng được khi broker kết nối.';
+    $('modeWarning').classList.add('show');
+    if (!remoteWarningShown) { logMsg('Cảnh báo: firmware đang báo remote=0; lệnh MQTT có thể bị chặn.'); remoteWarningShown = true; }
+  }
+  async function updateDirectStatus() {
+    if (transport !== 'direct' || directPollBusy) return;
+    directPollBusy = true;
+    try {
+      const started = performance.now();
+      const n = await getDirectJson('/netinfo');
+      directLastLatencyMs = Math.round(performance.now() - started);
+      setBadge('DIRECT IP - XE ONLINE', true);
+      enableControls(true);
+      $('networkInfo').textContent = 'ESP32_CAR: ' + (n.apIp || '192.168.4.1') +
+        ' | Wi-Fi ngoài: ' + (n.sta ? ('đã kết nối ' + (n.staSsid || '') + ' (' + n.ip + ')') : 'chưa kết nối') +
+        ' | MQTT ESP32: ' + (n.mqtt ? 'online' : 'offline') +
+        ' | Thiết bị AP: ' + (n.apClients ?? '?') +
+        ' | Kênh Wi-Fi: ' + (n.wifiChannel ?? '?') +
+        ' | Trễ HTTP: ' + directLastLatencyMs + 'ms';
+      // Đọc Device ID từ chính ESP32, không suy đoán từ giá trị mặc định.
+      if (n.topicBase && n.topicBase !== $('cfgTopic').value) $('cfgTopic').value = n.topicBase;
+      if (n.laser === 0) { $('vStatus').textContent = 'LỖI: KHÔNG THẤY SIÊU ÂM TRƯỚC'; $('vStatus').style.color = 'var(--yellow-neon)'; }
+      const data = await getDirectJson('/telemetry');
+      updateTelemetry(data);
+    } catch (err) {
+      setBadge('MẤT KẾT NỐI DIRECT IP', false);
+      enableControls(false);
+      $('networkInfo').textContent = 'Không thể lấy trạng thái ESP32 qua Direct IP. ' + err.message;
+    } finally { directPollBusy = false; }
+  }
+
+  function clearDriveHold(sendStop = true) {
+    const hadActive = activeDriveCommand !== null;
+    activeDrivePointerId = null; activeDriveSource = null; activeDriveCommand = null;
+    if (driveHeartbeatTimer !== null) { clearInterval(driveHeartbeatTimer); driveHeartbeatTimer = null; }
+    document.querySelectorAll('.btn-drive.active').forEach(b => b.classList.remove('active'));
+    if (sendStop && hadActive) publishCmd('drive', 'S');
+  }
+  let camOn=false, camLastFrameAt=0, epoch=0, imageUrl='', key=null;
+  const pending=new Map(), encoder=new TextEncoder(), decoder=new TextDecoder();
+  const cameraBase=()=>topicBase+'/cam-v1';
+  const hex=bytes=>Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+  let serverClockOffset=0, clockCheckedAt=0;
+  let encryptedReplies=0;
+  async function syncCameraClock(){
+    if(clockCheckedAt && performance.now()-clockCheckedAt<60000)return;
+    if(!/^https?:$/.test(location.protocol))return;
+    const began=Date.now();
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),5000);
+    try{
+      const url=new URL(location.href);
+      url.searchParams.set('camera_clock',String(began));
+      const response=await fetch(url,{method:'HEAD',cache:'no-store',signal:controller.signal});
+      const date=Date.parse(response.headers.get('Date') || '');
+      if(!response.ok || !Number.isFinite(date))throw Error('Không đọc được giờ máy chủ.');
+      serverClockOffset=date+500-(began+Date.now())/2;
+      clockCheckedAt=performance.now();
+      logMsg('Đã đồng bộ giờ camera. Độ lệch đồng hồ '+Math.round(serverClockOffset/1000)+' giây.');
+    }catch(error){
+      throw Error('Không đồng bộ được giờ. Bật ngày giờ tự động trên điện thoại rồi tải lại trang.');
+    }finally{clearTimeout(timeout);}
+  }
+  async function unlock(){
+    if(!client?.connected)throw Error('Bấm KẾT NỐI / KIỂM TRA ở phần cấu hình trước.');
+    await syncCameraClock();
+    if(key)return;
+    const input = await new Promise(resolve=>{
+      const box=document.createElement('dialog');
+      box.innerHTML='<form method="dialog"><label>Mật khẩu camera <input type="password" autocomplete="off" autocapitalize="none" spellcheck="false"></label><button value="ok">Xác nhận</button><button value="cancel">Hủy</button></form>';
+      document.body.appendChild(box);
+      box.addEventListener('close',()=>{const value=box.returnValue==='ok'?box.querySelector('input').value:'';box.remove();resolve(value);},{once:true});
+      box.showModal(); box.querySelector('input').focus();
+    });
+    if (input.length < 8) throw Error('Mật khẩu camera cần ít nhất 8 ký tự.');
+    const keyBytes = /^[a-f0-9]{64}$/i.test(input)
+      ? Uint8Array.from(input.match(/../g), value => parseInt(value, 16))
+      : new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(input)));
+    key = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['encrypt','decrypt']);
+  }
+  async function requestCamera(op,arg='',onFrame=null){
+    if(!client?.connected || !key)throw Error('Camera chưa kết nối.');
+    const id=hex(crypto.getRandomValues(new Uint8Array(16)));
+    const iv=crypto.getRandomValues(new Uint8Array(12));
+    const body=encoder.encode([id,Math.round(Date.now()+serverClockOffset),op,arg].join('\n'));
+    const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:encoder.encode('request')},key,body);
+    const packet=new Uint8Array(12+cipher.byteLength);
+    packet.set(iv);packet.set(new Uint8Array(cipher),12);
+    const repliesBefore=encryptedReplies;
+    return new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{pending.delete(id);reject(Error(encryptedReplies>repliesBefore
+        ? 'Đã nhận gói camera nhưng chưa đọc được phản hồi của yêu cầu này. Bấm Đổi mật khẩu và nhập lại đúng mật khẩu trên laptop.'
+        : 'Không nhận gói camera. Topic đang dùng: '+cameraBase()+'. So sánh với laptop và đóng camera trên laptop trước khi thử lại.'));},3500);
+      pending.set(id,{finish(data){if(onFrame && Number.isInteger(data.frame)){onFrame(data); if(data.frame<5)return;}clearTimeout(timer);pending.delete(id);resolve(data);}});
+      if(client.connected)client.publish(cameraBase()+'/request',packet,{qos:0,retain:false});
+    });
+  }
+  async function cameraReply(raw){
+    encryptedReplies++;
+    if(!key || !pending.size || raw.length<28 || raw.length>62000)return;
+    try{
+      const bytes=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:raw.subarray(0,12),additionalData:encoder.encode('reply')},key,raw.subarray(12)));
+      const split=bytes.indexOf(10);if(split<0 || split>127)return;
+      const [id,result,state,last,mail,index]=decoder.decode(bytes.subarray(0,split)).split('|');
+      if(!pending.has(id))return;
+      observeCamera(state,last,mail);
+      $('guardStatus').textContent=({on:'Đang canh gác',off:'Đã tắt canh gác',waiting:'Chờ PIR ổn định'}[state]||'')+
+        (Number(last)?' · Gửi ảnh gần nhất '+new Date(Number(last)*1000).toLocaleString('vi-VN'):'')+
+        (mail==='3'?' · Lần gửi gần nhất lỗi':mail==='1'?' · Đang gửi ảnh':'');
+      pending.get(id).finish({result,frame:index===undefined?null:Number(index),jpeg:bytes.subarray(split+1)});
+    }catch{/* Only authenticated replies can complete a request. */}
+  }
+  async function guard(mode){
+    try{
+      await unlock();
+      const pin=prompt('Nhập mã canh gác GUARD_PIN (từ 4 ký tự)');if(!pin)return;
+      const d=await requestCamera(mode,pin);
+      if(d.result==='ok')recordEvent(mode==='arm'?'Camera đã nhận lệnh bật canh gác.':'Camera đã nhận lệnh tắt canh gác.');
+      $('guardReply').textContent=d.result==='ok'?'Camera đã xác nhận.':'Kiểm tra lại GUARD_PIN.';
+    }catch(e){$('guardReply').textContent=e.message;}
+  }
+  $('armEmail').onclick=()=>guard('arm');$('disarmEmail').onclick=()=>guard('off');
+  $('camCheck').onclick=async()=>{
+    try{await unlock();await requestCamera('status');$('camDiagnostic').textContent='Camera đã trả lời.';}
+    catch(e){$('camDiagnostic').textContent=e.message;}
+  };
+  $('forgetKey').onclick=()=>{toggleCamera(false);key=null;$('camDiagnostic').textContent='Đã xóa mật khẩu khỏi tab này.';};
+  async function toggleCamera(force){
+    const enable=typeof force==='boolean'?force:!camOn;
+    if(enable){try{await unlock();}catch(e){$('camStatus').textContent=e.message;return;}}
+    const g=++epoch;
+    camOn=enable;camLastFrameAt=0;clearDriveHold(true);
+    $('camToggle').textContent=enable?'TẮT CAMERA':'BẬT CAMERA';
+    $('camImage').hidden=true;$('camPlaceholder').hidden=false;
+    $('camImage').removeAttribute('src');if(imageUrl)URL.revokeObjectURL(imageUrl);imageUrl='';
+    $('camStatus').textContent=enable?'Đang chờ ảnh…':'Camera tắt.';
+    let batch = 0, inFlight = 0, highestReceived = 0;
+    let decoding = false, waiting = null;
+    let shown = 0, windowStart = performance.now();
+    const active = () => camOn && epoch === g;
+    async function drawLatest(){
+      if(decoding)return;
+      decoding = true;
+      try{
+        while(active() && waiting){
+          const frame = waiting;
+          waiting = null;
+          const url = URL.createObjectURL(new Blob([frame.jpeg], {type:'image/jpeg'}));
+          try{
+            const image = new Image();
+            image.src = url;
+            await image.decode();
+            if(!active() || Date.now()-frame.started>1900)continue;
+            const old = imageUrl;
+            imageUrl = url;
+            $('camImage').src = url;
+            $('camImage').hidden = false;
+            $('camPlaceholder').hidden = true;
+            if(old)URL.revokeObjectURL(old);
+            camLastFrameAt = frame.started;
+            shown++;
+            const duration = performance.now()-windowStart;
+            if(duration>=1000){
+              $('camStatus').textContent=image.naturalWidth+' × '+image.naturalHeight+' · '+(shown*1000/duration).toFixed(1)+' hình/giây';
+              shown=0;
+              windowStart=performance.now();
+            }
+          }catch(error){if(active())$('camStatus').textContent='Điện thoại chưa đọc được ảnh JPEG.';}
+          finally{if(imageUrl!==url)URL.revokeObjectURL(url);}
+        }
+      }finally{decoding=false;}
+    }
+    async function getBatch(){
+      if(!active() || inFlight>=2)return;
+      inFlight++;
+      const started=Date.now(), base=++batch*6;
+      let requestedNext=false;
+      try{
+        const reply=await requestCamera('burst',$('remoteSize').value,data=>{
+          const order=base+data.frame;
+          if(!active() || order<=highestReceived || !data.jpeg.length || data.result!=='ok')return;
+          highestReceived=order;
+          waiting={jpeg:data.jpeg,started};
+          void drawLatest();
+          if(!requestedNext && data.frame>=3 && data.frame<5 && inFlight===1 && Date.now()-started<1100){
+            requestedNext=true;
+            void getBatch();
+          }
+        });
+        if(reply.frame===null)throw Error('Camera cần firmware hỗ trợ gửi 6 ảnh.');
+      }catch(error){
+        if(active() && inFlight===1){
+          $('camStatus').textContent=error.message;
+          await new Promise(resolve=>setTimeout(resolve,500));
+        }
+      }finally{
+        inFlight--;
+        if(active() && inFlight===0)void getBatch();
+      }
+    }
+    void getBatch();
+  }
+  $('camToggle').onclick=()=>toggleCamera();
+  setInterval(() => {
+    if (camOn && activeDriveCommand !== null && (!camLastFrameAt || Date.now()-camLastFrameAt > 2000)) {
+      clearDriveHold(true);
+      $('camStatus').textContent = 'Không có tiến triển luồng hình quá 2 giây — đã gửi lệnh dừng.';
+    }
+  },200);
+  window.addEventListener('pagehide', () => { if (camOn) toggleCamera(false); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && camOn) toggleCamera(false); });
+
+  function startDrive(command, source, token, button) {
+    if (command === 'S') { clearDriveHold(false); publishCmd('drive', 'S'); return; }
+    if (camOn && (!camLastFrameAt || Date.now() - camLastFrameAt > 2000)) {
+      $('camStatus').textContent = 'Chưa có hình mới từ camera — chưa cho xe chạy.';
+      publishCmd('drive', 'S'); return;
+    }
+    if (activeDriveCommand !== null && (activeDriveSource !== source || activeDrivePointerId !== token)) return;
+    const isNewCommand = activeDriveCommand !== command;
+    activeDriveSource = source; activeDrivePointerId = token; activeDriveCommand = command;
+    document.querySelectorAll('.btn-drive').forEach(b => b.classList.toggle('active', b.dataset.drive === command));
+    if (isNewCommand) publishCmd('drive', command);
+    if (driveHeartbeatTimer === null) {
+      driveHeartbeatTimer = setInterval(() => {
+        if (activeDriveCommand !== null && (transport === 'direct' ||
+            (transport === 'mqtt' && client && client.connected && lastVehicleOnline))) {
+          publishCmd('drive', activeDriveCommand);
+        }
+      }, DRIVE_HEARTBEAT_MS);
+    }
+  }
+  document.querySelectorAll('[data-drive]').forEach(btn => {
+    btn.style.touchAction = 'none';
+    btn.addEventListener('pointerdown', e => {
+      if (btn.disabled) return;
+      if (e.cancelable) e.preventDefault();
+      startDrive(btn.dataset.drive, 'pointer', e.pointerId, btn);
+    }, {passive:false});
+    btn.addEventListener('pointerenter', e => {
+      // Cho phép kéo giữ sang hướng mới nếu cùng pointer; bỏ qua pointerleave.
+      if (activeDriveSource === 'pointer' && activeDrivePointerId === e.pointerId && btn.dataset.drive !== 'S') {
+        startDrive(btn.dataset.drive, 'pointer', e.pointerId, btn);
+      }
+    });
+    btn.addEventListener('contextmenu', e => e.preventDefault());
+  });
+  window.addEventListener('pointerup', e => {
+    if (activeDriveSource === 'pointer' && activeDrivePointerId === e.pointerId) clearDriveHold(true);
+  });
+  window.addEventListener('pointercancel', e => {
+    if (activeDriveSource === 'pointer' && activeDrivePointerId === e.pointerId) clearDriveHold(true);
+  });
+  window.addEventListener('blur', () => clearDriveHold(true));
+  document.addEventListener('visibilitychange', () => { if (document.hidden) clearDriveHold(true); });
+
+  // Phím mũi tên/WASD giữ chạy; nhả phím thì dừng.
+  const keyMap = {'ArrowUp':'F','w':'F','W':'F','ArrowDown':'B','s':'B','S':'B','ArrowLeft':'L','a':'L','A':'L','ArrowRight':'R','d':'R','D':'R'};
+  window.addEventListener('keydown', e => {
+    if (e.repeat || !keyMap[e.key] || $('btnF').disabled || document.hidden) return;
+    const target = e.target;
+    if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+    e.preventDefault(); startDrive(keyMap[e.key], 'keyboard', e.key, null);
+  });
+  window.addEventListener('keyup', e => {
+    if (activeDriveSource === 'keyboard' && activeDrivePointerId === e.key) clearDriveHold(true);
+  });
+
+  document.querySelectorAll('[data-speed]').forEach(btn => btn.addEventListener('click', () => {
+    publishCmd('speed', btn.dataset.speed);
+    document.querySelectorAll('[data-speed]').forEach(b => b.classList.toggle('active', b === btn));
+    logMsg('Đặt tốc độ PWM: ' + btn.dataset.speed);
+  }));
+  $('estopBtn').addEventListener('click', () => {
+    clearDriveHold(false); publishCmd('estop', '1');
+    logMsg('ĐÃ GỬI YÊU CẦU DỪNG KHẨN CẤP (cần xác nhận xe đã dừng).');
+  });
+  let audioSession = null;
+  let talkHeld=false;
+  const audioText = s => { $('audioStatus').textContent = s; };
+  const enc = new TextEncoder();
+  async function audioSend(s, kind, samples) {
+    if (!s.client.connected) return;
+    const raw = new Uint8Array(21 + (samples ? samples.byteLength : 0));
+    raw[0] = kind.charCodeAt(0);
+    raw.set(s.phone, 1); raw.set(s.token, 9);
+    new DataView(raw.buffer).setUint32(17, ++s.seq);
+    if (samples) raw.set(new Uint8Array(samples), 21);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const body = await crypto.subtle.encrypt({name:'AES-GCM', iv, additionalData:enc.encode('down')}, s.key, raw);
+    if ((!s.client.connected) || (kind !== 'S' && audioSession !== s)) return;
+    const packet = new Uint8Array(12 + body.byteLength);
+    packet.set(iv); packet.set(new Uint8Array(body), 12);
+    s.client.publish(s.base+'/down', packet, {qos:0,retain:false});
+  }
+  async function stopAudio(msg='Đã dừng âm thanh.') {
+    const s = audioSession;
+    if (!s) return;
+    audioSession=null;
+    clearInterval(s.timer);
+    const stopped=s.confirmed ? audioSend(s,'S').catch(()=>{}) : Promise.resolve();
+    if (s.stream) s.stream.getTracks().forEach(t=>t.stop());
+    if(s.node)s.node.disconnect();
+    if(s.ctx)await s.ctx.close().catch(()=>{});
+    await stopped;
+    audioText(msg);
+  }
+  async function beginAudio(mode, playback=false) {
+    if (audioSession) {await stopAudio(); if (mode==='L') return;}
+    if(mode==='T' && !talkHeld)return;
+    if (!client?.connected || !lastVehicleOnline || remoteAllowed===false) {
+      audioText('Kết nối MQTT và bật điều khiển từ xa trên xe trước.'); return;
+    }
+    const code=$('audioKey').value.trim().toUpperCase();
+    if (!(/^[A-HJ-NP-Z2-9]{8}$/.test(code) || /^[a-f0-9]{32}$/i.test(code))) {audioText('Nhập 8 ký tự AUDIO_CODE từ Serial Monitor của xe.');return;}
+    if (!window.isSecureContext || !crypto.subtle) {audioText('Mở dashboard bằng đường dẫn HTTPS.'); return;}
+    const s={mode,client,base:topicBase+'/audio-v1',phone:crypto.getRandomValues(new Uint8Array(8)),
+      token:new Uint8Array(8),seq:0,rx:0,last:performance.now(),next:0,confirmed:false,started:false};
+    audioSession=s;
+    try {
+      s.ctx=new AudioContext({latencyHint:"interactive"});
+      await s.ctx.resume();
+      if(code.length===32) {
+        s.key=await crypto.subtle.importKey('raw',Uint8Array.from(code.match(/../g),v=>parseInt(v,16)),'AES-GCM',false,['encrypt','decrypt']);
+      } else {
+      const material = await crypto.subtle.importKey('raw', enc.encode(code), 'PBKDF2', false, ['deriveKey']);
+      const salt = new Uint8Array([198, 240, 95, 1, 113, 49, 128, 241, 212, 221, 97, 80, 222, 123, 239, 108]);
+      s.key = await crypto.subtle.deriveKey({name:'PBKDF2', hash:'SHA-256', iterations:310000, salt},
+        material, {name:'AES-GCM', length:128}, false, ['encrypt','decrypt']);
+      }
+      const url=URL.createObjectURL(new Blob([$('audio-worklet').textContent],{type:'text/javascript'}));
+      try {await s.ctx.audioWorklet.addModule(url);} finally {URL.revokeObjectURL(url);}
+      if(audioSession!==s)return;
+      if(mode==='L' || (mode==='T' && !playback))
+        s.node=new AudioWorkletNode(s.ctx,'car-sound',{processorOptions:{mode},outputChannelCount:[1]});
+      if(mode==='L')s.node.connect(s.ctx.destination);
+      s.playback=playback;
+
+      if (audioSession!==s) return;
+      if (mode==='T' && !playback) {
+        s.stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:false}});
+        if (audioSession!==s) {s.stream.getTracks().forEach(t=>t.stop());return;}
+        const source=s.ctx.createMediaStreamSource(s.stream);
+        const highpass=s.ctx.createBiquadFilter();
+        highpass.type='highpass';highpass.frequency.value=110;
+        const node=s.node;
+        const silent=s.ctx.createGain();silent.gain.value=0;
+        source.connect(highpass).connect(node).connect(silent).connect(s.ctx.destination);
+        node.port.onmessage=({data})=>{
+          if (audioSession!==s || !s.started || s.sending) return;
+          s.sending=true;
+          const pcm=new Int16Array(data), gain=Number($('speakerLevel').value)/100;
+          for(let i=0;i<pcm.length;i++) {
+            const sample=pcm[i]*gain/32768, peak=Math.abs(sample);
+            const limited=peak<=0.8 ? peak : 0.8+0.2*Math.tanh((peak-0.8)/0.2);
+            pcm[i]=Math.round(Math.sign(sample)*limited*32767);
+          }
+          audioSend(s,'V',data).catch(()=>{if(audioSession===s)stopAudio('Lỗi gửi tiếng.');}).finally(()=>s.sending=false);
+        };
+      }
+      if (audioSession!==s) return;
+      audioText('Đang chờ xe trả lời…');
+      s.last=performance.now();
+      s.timer=setInterval(()=>{
+        if (audioSession!==s) return;
+        if (!s.client.connected || performance.now()-s.last>4000) {
+          stopAudio('Xe chưa trả lời. Kiểm tra xe đang dừng, MQTT, firmware và khóa âm thanh.');return;
+        }
+        if (!s.confirmed) audioSend(s,'H').catch(()=>{});
+        else if (mode==='L') audioSend(s,'L').catch(()=>{});
+      },650);
+      await audioSend(s,'H');
+    } catch(e) {if(audioSession===s)stopAudio('Lỗi âm thanh: '+e.message);}
+  }
+  let audioReceiveChain=Promise.resolve();
+  function receiveAudio(payload) {
+    const active=audioSession;
+    audioReceiveChain=audioReceiveChain.then(()=>{if(audioSession===active)return receiveAudioFrame(payload);}).catch(()=>{});
+  }
+  async function receiveAudioFrame(payload) {
+    const s=audioSession;
+    if (!s?.key || payload.length<49 || payload.length>1073) return;
+    try {
+      const data=Uint8Array.from(payload);
+      const decoded=await crypto.subtle.decrypt({name:'AES-GCM',iv:data.slice(0,12),additionalData:enc.encode('up')},s.key,data.slice(12));
+      const raw=new Uint8Array(decoded), view=new DataView(decoded);
+      if(audioSession!==s || !s.phone.every((b,i)=>b===raw[i+1])) return;
+      const k=String.fromCharCode(raw[0]), seq=view.getUint32(17);
+      if (seq<=s.rx) return;
+      if(k==='C' && !s.confirmed) {
+        s.rx=seq; s.token=raw.slice(9,17); s.confirmed=true; s.last=performance.now();
+        await audioSend(s,$('micLevel').value);
+        await audioSend(s,s.mode);return;
+      }
+      if(!s.confirmed || !s.token.every((b,i)=>b===raw[i+9])) return;
+      s.rx=seq; s.last=performance.now();
+      if(!s.started) {s.started=true;audioText(s.playback?'Đang phát bản ghi qua loa xe.':(s.mode==='T'?'Đang nói. Thả nút để dừng.':'Đang nghe từ xe. Bấm lại để dừng.'));}
+      if(k!=='A' || s.mode!=='L' || raw.length!==1045) return;
+      s.node.port.postMessage(raw.slice(21).buffer);
+
+    } catch (_) { /* Ignore unauthenticated or obsolete frames. */ }
+  }
+  $('micLevel').onchange=()=>{if(audioSession?.confirmed)audioSend(audioSession,$('micLevel').value).catch(()=>{});};
+  $('listenCar').onclick=()=>beginAudio('L');
+  const talkButton=$('talkCar');
+  talkButton.oncontextmenu=e=>e.preventDefault();
+  talkButton.onpointerdown=e=>{if(!e.isPrimary||e.button!==0)return;e.preventDefault();talkHeld=true;talkButton.setPointerCapture(e.pointerId);beginAudio('T');};
+  for(const ev of ['pointerup','pointercancel','lostpointercapture'])talkButton.addEventListener(ev,()=>{talkHeld=false;if(audioSession?.mode==='T')stopAudio();});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden){talkHeld=false;stopAudio();}});
+  window.addEventListener('pagehide',()=>stopAudio());
+
+  async function connectMqtt() {
+    stopAudio();
+    clearDriveHold(true);
+    if (isSameOriginDirect()) {
+      transport = 'direct';
+      if (client) { try { client.end(true); } catch (_) {} client = null; }
+      setBadge('ĐANG KIỂM TRA DIRECT IP...', false);
+      logMsg('Đang dùng Direct IP vì trang được mở từ cùng địa chỉ ESP32.');
+      await updateDirectStatus();
+      if (statusTimer) clearInterval(statusTimer);
+      statusTimer = setInterval(updateDirectStatus, 1600);
+      return;
+    }
+    if (!window.mqtt) { setBadge('KHÔNG TẢI ĐƯỢC MQTT', false); logMsg('Không tải được mqtt.js. Kiểm tra Internet/CDN.'); return; }
+    const base = baseTopic();
+    if (!base || !base.includes('/')) { alert('Nhập Topic gốc dạng pbl3/xeXXXXXX hoặc pbl3/<Device ID>.'); return; }
+    if (client) { try { client.end(true); } catch (_) {} client = null; }
+    if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+    if (mqttWatchdogTimer) { clearInterval(mqttWatchdogTimer); mqttWatchdogTimer = null; }
+    lastTelemetryAt = 0; lastVehicleOnline = false; remoteAllowed = null; mqttTransportUp = false; anotherTransportDriving = false;
+    transport = 'mqtt'; topicBase = base;
+    const url = normalizeBroker($('cfgBroker').value);
+    setBadge('ĐANG KẾT NỐI MQTT...', false);
+    logMsg('Đang kết nối ' + url + ' | topic ' + topicBase);
+    const cid = 'esp32carpro_' + Date.now().toString(36) + '_' + Math.random().toString(16).slice(2,8);
+    try {
+      client = mqtt.connect(url, {clientId:cid, clean:true, connectTimeout:12000, keepalive:25, reconnectPeriod:2500, protocolVersion:4, resubscribe:true});
+    } catch (err) { setBadge('LỖI MQTT', false); logMsg('Không tạo được kết nối MQTT: ' + err.message); return; }
+    client.on('connect', () => {
+      mqttTransportUp = true;
+      lastTelemetryAt = 0; lastVehicleOnline = false;
+      refreshMqttPresence();
+      logMsg('Đã kết nối MQTT broker; đang CHỜ telemetry mới từ ESP32.');
+      client.subscribe([topicBase+'/audio-v1/up',cameraBase()+'/reply',topicBase + '/telemetry', topicBase + '/status', topicBase + '/event'], {qos:0}, err => { if (err) logMsg('Lỗi đăng ký topic: ' + err.message); });
+    });
+    client.on('reconnect', () => { mqttTransportUp = false; lastVehicleOnline = false; clearDriveHold(false); setBadge('ĐANG KẾT NỐI LẠI MQTT...', false); enableControls(false); });
+    client.on('offline', () => { mqttTransportUp = false; lastVehicleOnline = false; clearDriveHold(false); setBadge('MQTT NGOẠI TUYẾN', false); enableControls(false); });
+    client.on('close', () => { mqttTransportUp = false; lastVehicleOnline = false; clearDriveHold(false); if (client) setBadge('MẤT KẾT NỐI MQTT', false); enableControls(false); });
+    client.on('error', err => { setBadge('LỖI MQTT', false); logMsg('Lỗi MQTT: ' + (err && err.message ? err.message : 'không rõ')); });
+    client.on('message', (receivedTopic, payload) => {
+      if(receivedTopic===topicBase+'/audio-v1/up'){receiveAudio(payload);return;}
+      if(receivedTopic===cameraBase()+'/reply'){cameraReply(payload);return;}
+      const val = payload.toString();
+      if (receivedTopic === topicBase + '/telemetry') {
+        try {
+          const data = JSON.parse(val);
+          lastTelemetryAt = Date.now(); lastVehicleOnline = true;
+          updateTelemetry(data);
+          $('networkInfo').textContent = 'MQTT: nhận dữ liệu ESP32 ' + (data.ip || '') +
+            ' | mode: ' + (data.mode || '?') + ' | Wi-Fi RSSI: ' + (data.rssi ?? '?') + ' dBm';
+        } catch (_) { logMsg('Telemetry JSON không hợp lệ.'); }
+      } else if (receivedTopic === topicBase + '/status') {
+        const online = val.trim().toLowerCase() === 'online';
+        if (!online) { lastVehicleOnline = false; lastTelemetryAt = 0; refreshMqttPresence(); $('vStatus').textContent = 'ESP32: ' + val.trim(); }
+      } else if (receivedTopic === topicBase + '/event') {
+        try { const obj = JSON.parse(val); logMsg((obj.type ? '[' + obj.type + '] ' : '') + (obj.msg || val)); }
+        catch (_) { logMsg(val); }
+      }
+    });
+    mqttWatchdogTimer = setInterval(refreshMqttPresence, 1000);
+  }
+  $('connectBtn').addEventListener('click', connectMqtt);
+  // Direct mode can be auto-selected when opened directly from http://192.168.4.1.
+  enableControls(false);
+  if (isSameOriginDirect()) {
+    transport = 'direct'; setBadge('ĐANG KIỂM TRA DIRECT IP', false);
+    updateDirectStatus(); statusTimer = setInterval(updateDirectStatus, 1600);
+    logMsg('Đang dùng Direct IP cùng nguồn: ' + window.location.origin + '.');
+  } else {
+    setBadge('CHƯA KẾT NỐI', false);
+    logMsg('Dashboard v1.8.0 MJPEG tương thích firmware 1.13.1-monitor-5cm. Nhập topicBase của xe rồi bấm KẾT NỐI / KIỂM TRA để dùng MQTT.');
+  }
+})();
+</script>
+</body>
+</html>
