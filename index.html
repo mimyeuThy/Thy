@@ -729,9 +729,10 @@ registerProcessor('car-sound',CarSound);
       }finally{decoding=false;}
     }
     async function getBatch(){
-      if(!active() || inFlight>=1)return;
+      if(!active() || inFlight>=2)return;
       inFlight++;
       const started=Date.now(), base=++batch*6;
+      let prefetched=false;
       try{
         const reply=await requestCamera('burst',$('remoteSize').value,data=>{
           const order=base+data.frame;
@@ -742,7 +743,12 @@ registerProcessor('car-sound',CarSound);
           // without treating network-delayed frames as fresh on receipt.
           const offset=Math.min(data.captureOffset,Math.max(0,Date.now()-started));
           waiting={jpeg:data.jpeg,started:started+offset};
+          const decoderReady=!decoding;
           void drawLatest();
+          if(!prefetched && data.frame===4 && inFlight===1 && decoderReady && Date.now()-started<600){
+            prefetched=true;
+            void getBatch();
+          }
         });
         if(reply.result!=='ok')throw Error('Camera đang bận. Đóng trang khác đang xem camera rồi thử lại.');
         if(reply.frame===null)throw Error('Camera cần firmware hỗ trợ gửi 6 ảnh.');
