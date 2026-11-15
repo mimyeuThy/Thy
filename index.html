@@ -649,7 +649,7 @@ registerProcessor('car-sound',CarSound);
       const timer=setTimeout(()=>{pending.delete(id);reject(Error(encryptedReplies>repliesBefore
         ? 'Đã nhận gói camera nhưng chưa đọc được phản hồi của yêu cầu này. Bấm Đổi mật khẩu và nhập lại đúng mật khẩu trên laptop.'
         : 'Không nhận gói camera. Topic đang dùng: '+cameraBase()+'. So sánh với laptop và đóng camera trên laptop trước khi thử lại.'));},3500);
-      pending.set(id,{finish(data){if(onFrame && Number.isInteger(data.frame)){onFrame(data); if(data.frame<5)return;}clearTimeout(timer);pending.delete(id);resolve(data);}});
+      pending.set(id,{finish(data){if(onFrame && Number.isInteger(data.frame)){onFrame(data); if(data.result==='ok' && data.frame<5)return;}clearTimeout(timer);pending.delete(id);resolve(data);}});
       if(client.connected)client.publish(cameraBase()+'/request',packet,{qos:0,retain:false});
     });
   }
@@ -659,13 +659,13 @@ registerProcessor('car-sound',CarSound);
     try{
       const bytes=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:raw.subarray(0,12),additionalData:encoder.encode('reply')},key,raw.subarray(12)));
       const split=bytes.indexOf(10);if(split<0 || split>127)return;
-      const [id,result,state,last,mail,index]=decoder.decode(bytes.subarray(0,split)).split('|');
+      const [id,result,state,last,mail,index,captureOffset]=decoder.decode(bytes.subarray(0,split)).split('|');
       if(!pending.has(id))return;
       observeCamera(state,last,mail);
       $('guardStatus').textContent=({on:'Đang canh gác',off:'Đã tắt canh gác',waiting:'Chờ PIR ổn định'}[state]||'')+
         (Number(last)?' · Gửi ảnh gần nhất '+new Date(Number(last)*1000).toLocaleString('vi-VN'):'')+
         (mail==='3'?' · Lần gửi gần nhất lỗi':mail==='1'?' · Đang gửi ảnh':'');
-      pending.get(id).finish({result,frame:index===undefined?null:Number(index),jpeg:bytes.subarray(split+1)});
+      pending.get(id).finish({result,frame:index===undefined?null:Number(index),captureOffset:Math.max(0,Number(captureOffset)||0),jpeg:bytes.subarray(split+1)});
     }catch{/* Only authenticated replies can complete a request. */}
   }
   async function guard(mode){
@@ -729,22 +729,22 @@ registerProcessor('car-sound',CarSound);
       }finally{decoding=false;}
     }
     async function getBatch(){
-      if(!active() || inFlight>=2)return;
+      if(!active() || inFlight>=1)return;
       inFlight++;
       const started=Date.now(), base=++batch*6;
-      let requestedNext=false;
       try{
         const reply=await requestCamera('burst',$('remoteSize').value,data=>{
           const order=base+data.frame;
           if(!active() || order<=highestReceived || !data.jpeg.length || data.result!=='ok')return;
           highestReceived=order;
-          waiting={jpeg:data.jpeg,started};
+          // Old firmware omits the offset (zero); new firmware reports time
+          // spent capturing this frame within the burst. Account for that
+          // without treating network-delayed frames as fresh on receipt.
+          const offset=Math.min(data.captureOffset,Math.max(0,Date.now()-started));
+          waiting={jpeg:data.jpeg,started:started+offset};
           void drawLatest();
-          if(!requestedNext && data.frame>=3 && data.frame<5 && inFlight===1 && Date.now()-started<1100){
-            requestedNext=true;
-            void getBatch();
-          }
         });
+        if(reply.result!=='ok')throw Error('Camera đang bận. Đóng trang khác đang xem camera rồi thử lại.');
         if(reply.frame===null)throw Error('Camera cần firmware hỗ trợ gửi 6 ảnh.');
       }catch(error){
         if(active() && inFlight===1){
