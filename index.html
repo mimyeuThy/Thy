@@ -54,12 +54,11 @@
     <button class="cam-button" id="armEmail">Bật canh gác</button>
     <button class="cam-button" id="disarmEmail">Tắt canh gác</button>
     <button class="cam-button" id="testGuardPhoto" type="button">Thử gửi 1 ảnh</button>
-    <p class="note">Canh gác chạy khi tắt xem trực tiếp hoặc đóng trang. Giữ ESP32-CAM và PIR có nguồn, camera có Wi-Fi để gửi ảnh.</p>
-    <p id="guardStatus" role="status">Bật canh gác để bắt đầu chờ khu vực yên 60 giây.</p>
+    <p id="guardStatus" role="status">Bấm Kiểm tra camera để đọc trạng thái canh gác.</p>
     <p id="pirDiagnostic" class="note"></p>
     <p id="guardReply" role="status"></p></div>
     <p id="camDiagnostic" class="cam-status" role="status"></p>
-    <div id="camStatus" class="cam-status" role="status">Đang tắt xem trực tiếp.</div>
+    <div id="camStatus" class="cam-status" role="status">Camera đã tắt.</div>
   </div>
   <div class="card"><div class="card-header">KHOẢNG CÁCH PHÍA TRƯỚC</div>
     <div class="tele-card front-distance"><div class="label">CẢM BIẾN TRƯỚC</div><div id="vFront" class="val">Chưa có số đo</div></div>
@@ -819,11 +818,9 @@ registerProcessor('car-sound',CarSound);
         drive:'Lỗi khi lưu ảnh vào thư mục Drive',saved:'Đã lưu Drive, Apps Script báo Gmail chưa gửi được',
         emailed:'Apps Script xác nhận đã gửi Gmail',legacy:'Máy chủ nhận ảnh, bản Apps Script cũ chưa xác nhận kết quả Gmail',
         hardware:'Camera hoặc tác vụ PIR chưa khởi động'}[fault]||'';
-      let stateLabel=guardLabels[state]||'Chưa đọc được trạng thái PIR';
-      if(Number(quiet)>0){
-        if(state==='ready')stateLabel='Chờ yên thêm '+Number(quiet)+' giây để bắt đầu canh gác';
-        if(state==='quiet')stateLabel='Chờ yên thêm '+Number(quiet)+' giây để canh gác lại';
-      }
+      const stateLabel=state==='quiet'&&Number(quiet)>0
+        ? 'Chờ yên thêm '+Number(quiet)+' giây để canh gác lại'
+        : guardLabels[state]||'Chưa đọc được trạng thái PIR';
       const httpDetail=(fault==='http'||fault==='deploy')&&Number(httpCode)?' (HTTP '+Number(httpCode)+')':'';
       const attempt=source==='P'?'PIR tự động':source==='T'?'Ảnh thử':'Ảnh canh gác';
       const status=mail==='1'?(fault==='wifi'||fault==='clock'?reason:'Đang chụp và gửi ảnh'):
@@ -909,7 +906,7 @@ registerProcessor('car-sound',CarSound);
     $('camToggle').textContent=enable?'TẮT CAMERA':'BẬT CAMERA';
     $('camImage').hidden=true;$('camPlaceholder').hidden=false;
     $('camImage').removeAttribute('src');if(imageUrl)URL.revokeObjectURL(imageUrl);imageUrl='';
-    $('camStatus').textContent=enable?'Đang chờ ảnh…':'Đang tắt xem trực tiếp.';
+    $('camStatus').textContent=enable?'Đang chờ ảnh…':'Camera tắt.';
     let batch=0, highestReceived=0;
     const estimator=adaptiveCamera();
     let decoding = false, waiting = null;
