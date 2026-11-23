@@ -362,11 +362,14 @@ registerProcessor('car-sound',CarSound);
     try{localStorage.setItem(journalPrefix+journalTopic,JSON.stringify(journal));}catch{}
     renderJournal();
   }
+  const guardLabels={on:'Đang canh gác · Sẵn sàng',off:'Đã tắt canh gác',waiting:'Chờ PIR ổn định',
+    ready:'Chờ PIR về LOW',high:'Đã phát hiện chuyển động',held:'PIR giữ HIGH hơn 2 phút',
+    quiet:'Chờ khu vực yên để canh gác lại',pending:'Đang chờ lượt gửi'};
   function observeCamera(state,last,mail){
     selectJournal();
     cameraSeenAt=Date.now();
     if(observedGuard!==null && observedGuard!==state){
-      recordEvent('Camera xác nhận trạng thái canh gác: '+({on:'đang bật',off:'đã tắt',waiting:'đang chờ PIR ổn định'}[state]||state));
+      recordEvent('Canh gác · '+(guardLabels[state]||state));
     }
     const sent=Number(last);
     if(Number.isFinite(sent) && sent>0 && observedSent!==sent){
@@ -804,24 +807,28 @@ registerProcessor('car-sound',CarSound);
     try{
       const bytes=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:raw.subarray(0,12),additionalData:encoder.encode('reply')},key,raw.subarray(12)));
       const split=bytes.indexOf(10);if(split<0 || split>127)return;
-      const [id,result,state,last,mail,index,captureOffset,fault,pir,episodes,source]=decoder.decode(bytes.subarray(0,split)).split('|');
+      const [id,result,state,last,mail,index,captureOffset,fault,pir,episodes,source,quiet,httpCode]=decoder.decode(bytes.subarray(0,split)).split('|');
       if(!pending.has(id))return;
       observeCamera(state,last,mail);
-      const reason={wifi:'Camera đang chờ Wi-Fi để gửi ảnh',clock:'Camera đang chờ đồng bộ giờ',capture:'Camera chưa lấy được ảnh',
+      const reason={wifi:mail==='1'?'Đã chụp ảnh · Chờ Wi-Fi':'Hết thời gian chờ Wi-Fi để gửi ảnh',
+        clock:mail==='1'?'Đã chụp ảnh · Chờ đồng bộ giờ':'Hết thời gian chờ đồng bộ giờ',
+        capture:'Camera chưa lấy được ảnh',memory:'Camera thiếu bộ nhớ để gửi ảnh',busy:'Hàng chờ gửi ảnh đang đầy',
+        deploy:'Kiểm tra URL /exec và quyền truy cập của ứng dụng web Canh gác',
         denied:'TOKEN của dự án gửi ảnh chưa khớp',http:'Lỗi HTTPS hoặc Apps Script gửi ảnh',invalid:'Apps Script từ chối ảnh',
         drive:'Lỗi khi lưu ảnh vào thư mục Drive',saved:'Đã lưu Drive, Apps Script báo Gmail chưa gửi được',
         emailed:'Apps Script xác nhận đã gửi Gmail',legacy:'Máy chủ nhận ảnh, bản Apps Script cũ chưa xác nhận kết quả Gmail',
         hardware:'Camera hoặc tác vụ PIR chưa khởi động'}[fault]||'';
-      const stateLabel={on:'Đang canh gác',off:'Đã tắt canh gác',waiting:'Chờ PIR ổn định',
-        ready:'Chờ PIR về LOW',high:'PIR đang phát hiện chuyển động',held:'PIR giữ HIGH hơn 2 phút',
-        pending:'Đã ghi nhận chuyển động mới, đang chờ lượt gửi'}[state]||'Chưa đọc được trạng thái PIR';
+      const stateLabel=state==='quiet'&&Number(quiet)>0
+        ? 'Chờ yên thêm '+Number(quiet)+' giây để canh gác lại'
+        : guardLabels[state]||'Chưa đọc được trạng thái PIR';
+      const httpDetail=(fault==='http'||fault==='deploy')&&Number(httpCode)?' (HTTP '+Number(httpCode)+')':'';
       const attempt=source==='P'?'PIR tự động':source==='T'?'Ảnh thử':'Ảnh canh gác';
       const status=mail==='1'?(fault==='wifi'||fault==='clock'?reason:'Đang chụp và gửi ảnh'):
         reason||(mail==='3'?'Lần gửi gần nhất lỗi':mail==='2'?'Máy chủ đã nhận ảnh':'');
-      $('guardStatus').textContent=stateLabel+(status?' · '+(mail==='1'?'':attempt+': ')+status:'');
+      $('guardStatus').textContent=stateLabel+(status?' · '+(mail==='1'?'':attempt+' · ')+status+httpDetail:'');
       $('pirDiagnostic').textContent=pir==='0'||pir==='1'?'GPIO13: '+(pir==='1'?'HIGH':'LOW')+
         ' · '+episodes+' đợt từ lúc khởi động'+(Number(last)?' · Ảnh gần nhất '+new Date(Number(last)*1000).toLocaleString('vi-VN'):''):'';
-      if(reason)$('iotMail').textContent='Ảnh canh gác · '+reason;
+      if(reason)$('iotMail').textContent='Ảnh canh gác · '+reason+httpDetail;
       pending.get(id).finish({result,mail,fault,source,frame:index===undefined?null:Number(index),captureOffset:Math.max(0,Number(captureOffset)||0),jpeg:bytes.subarray(split+1)});
     }catch{/* Only authenticated replies can complete a request. */}
   }
@@ -831,7 +838,8 @@ registerProcessor('car-sound',CarSound);
       const pin=prompt('Nhập mã canh gác GUARD_PIN (từ 4 ký tự)');if(!pin)return;
       const d=await requestCamera(mode,pin);
       if(d.result==='ok')recordEvent(mode==='arm'?'Camera đã nhận lệnh bật canh gác.':'Camera đã nhận lệnh tắt canh gác.');
-      $('guardReply').textContent=d.result==='ok'?'Camera đã xác nhận.':'Kiểm tra lại GUARD_PIN.';
+      $('guardReply').textContent=({ok:'Camera đã xác nhận.',pin:'Mã canh gác chưa đúng.',
+        unavailable:'Camera chưa khởi động tác vụ canh gác.'}[d.result]||'Camera chưa xác nhận lệnh.');
     }catch(e){$('guardReply').textContent=e.message;}
   }
   $('armEmail').onclick=()=>guard('arm');$('disarmEmail').onclick=()=>guard('off');
