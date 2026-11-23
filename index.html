@@ -24,7 +24,6 @@
 .cam-frame{width:100%;min-height:180px;max-height:420px;aspect-ratio:4/3;background:#050811;border:1px solid var(--card-border);border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--text-sub);text-align:center}.cam-frame img{width:100%;height:100%;max-height:420px;object-fit:contain}.cam-tools{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}.cam-button{padding:10px 14px;background:#16a34a;color:white;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;border:0;border-radius:8px;cursor:pointer}.cam-status{font-size:12px;color:var(--text-sub);margin-top:8px;line-height:1.45}
 
 @media(max-width:900px){.dashboard-grid{grid-template-columns:1fr}.left-col{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}.left-col .card{height:fit-content}.right-col{min-width:0}}@media(max-width:600px){body{padding:8px}.header{padding:10px}.left-col{grid-template-columns:1fr}.telemetry-grid{grid-template-columns:1fr 1fr}.car-map-wrapper{height:270px}.sensor-box{min-width:78px;padding:5px 6px}.sensor-box .title{font-size:7px}.sensor-box .value{font-size:12px}.pos-front-left,.pos-rear-left{left:5px}.pos-front-right,.pos-rear-right{right:5px}.config-grid{grid-template-columns:1fr}.header-title{font-size:15px}.status-badge{font-size:9px;padding:6px 8px}}
-.care-frame{display:block;width:100%;min-height:260px;border:1px solid var(--card-border);border-radius:10px;background:#131c2d;margin-top:10px}.care-frame[hidden],#careOpen[hidden]{display:none}.care-settings{margin-top:10px}.care-settings summary{cursor:pointer}
 </style>
 </head>
 <body>
@@ -53,13 +52,10 @@
     <div><h3>Canh gác và gửi ảnh qua email</h3>
     <button class="cam-button" id="armEmail">Bật canh gác</button>
     <button class="cam-button" id="disarmEmail">Tắt canh gác</button>
-    <button class="cam-button" id="testGuardPhoto" type="button">Thử gửi 1 ảnh</button>
-    <p class="note">Canh gác chạy khi tắt xem trực tiếp hoặc đóng trang. Giữ ESP32-CAM và PIR có nguồn, camera có Wi-Fi để gửi ảnh.</p>
-    <p id="guardStatus" role="status">Bật canh gác để bắt đầu chờ khu vực yên 60 giây.</p>
-    <p id="pirDiagnostic" class="note"></p>
+    <p id="guardStatus" role="status">Đang chờ phản hồi camera…</p>
     <p id="guardReply" role="status"></p></div>
     <p id="camDiagnostic" class="cam-status" role="status"></p>
-    <div id="camStatus" class="cam-status" role="status">Đang tắt xem trực tiếp.</div>
+    <div id="camStatus" class="cam-status" role="status">Camera đã tắt.</div>
   </div>
   <div class="card"><div class="card-header">KHOẢNG CÁCH PHÍA TRƯỚC</div>
     <div class="tele-card front-distance"><div class="label">CẢM BIẾN TRƯỚC</div><div id="vFront" class="val">Chưa có số đo</div></div>
@@ -119,18 +115,6 @@
       <ol id="iotJournal"></ol>
     </details>
   </div>
-  <div class="config-card">
-    <div class="card-header">🍼 LỊCH UỐNG SỮA</div>
-    <p id="careStatus" class="note" role="status"></p>
-    <iframe id="careFrame" class="care-frame" title="Lịch uống sữa" referrerpolicy="no-referrer" hidden></iframe>
-    <button id="careOpen" class="cam-button" type="button" hidden>Mở lịch trong tab riêng</button>
-    <details id="careSettings" class="care-settings">
-      <summary>Kết nối lịch chăm sóc</summary>
-      <label class="config-label">Link Apps Script của lịch sữa<input id="careUrl" class="config-input" type="url" placeholder="Link /exec"></label>
-      <button id="careConnect" class="cam-button" type="button">Lưu kết nối lịch</button>
-      <p class="note">Giá trị CARE_DASHBOARD_ORIGIN <code id="careOrigin"></code></p>
-    </details>
-  </div>
   <div class="config-card"><div class="card-header">Âm thanh trên xe</div>
     <label class="config-label">Mã âm thanh · 4 ký tự sau khi ghép<input id="audioKey" maxlength="32" autocapitalize="characters" class="config-input" type="password" autocomplete="off" spellcheck="false"></label>
     <p id="pairHint" class="note">Lần đầu trên trình duyệt này, nhập mã âm thanh cũ và bấm Nghe từ xe. Lần sau dùng 4 ký tự cuối.</p>
@@ -167,25 +151,15 @@ class CarSound extends AudioWorkletProcessor {
     this.sum=0;this.weight=0;this.ratio=sampleRate/16000;
     this.queue=[];this.offset=0;this.total=0;this.playing=false;
     this.phase=0;this.current=0;this.following=0;this.level=0;this.last=0;
-    this.prefill=3;this.stable=0;this.blend=0;this.from=0;
     this.port.onmessage=({data})=>{
       if(this.mode==='T')return;
       const pcm=new Int16Array(data);
-      if(pcm.length!==512)return;
       this.queue.push(pcm);this.total+=pcm.length;
       if(this.total>4096) {
-        while(this.queue.length>6) {
-          this.total-=this.queue.shift().length-this.offset;
-          this.offset=0;
-        }
-        if(this.playing)this.seek();
+        this.queue=[pcm];this.offset=0;this.total=pcm.length;
+        this.playing=false;this.phase=0;this.level=0;this.last=0;
       }
     };
-  }
-  seek() {
-    this.from=this.last;this.blend=Math.round(sampleRate*0.006);
-    this.current=this.take();this.following=this.take();this.phase=0;
-    this.playing=true;
   }
   take() {
     if(!this.total)return null;
@@ -216,26 +190,21 @@ class CarSound extends AudioWorkletProcessor {
     }
     const out=outputs[0]?.[0];
     if(!out)return true;
-    if(!this.playing && this.total>=512*this.prefill)this.seek();
-    const blendSamples=Math.round(sampleRate*0.006);
+    if(!this.playing && this.total>=1536) {
+      this.current=this.take();this.following=this.take();
+      this.phase=0;this.playing=true;
+    }
     for(let i=0;i<out.length;i++) {
       if(this.playing) {
         const v=this.current+(this.following-this.current)*this.phase;
         this.level+=(1-this.level)*0.012;
-        const fade=this.blend/blendSamples;
-        out[i]=v*this.level*(1-fade)+this.from*fade;this.last=out[i];
-        if(this.blend>0)--this.blend;
-        if(++this.stable>=sampleRate*12){
-          this.prefill=Math.max(3,this.prefill-1);this.stable=0;
-        }
+        out[i]=v*this.level;this.last=out[i];
         this.phase+=16000/sampleRate;
         while(this.phase>=1 && this.playing) {
           this.phase-=1;
           this.current=this.following;
           const next=this.take();
-          if(next===null){
-            this.playing=false;this.level=0;this.stable=0;this.prefill=Math.min(5,this.prefill+1);
-          }
+          if(next===null){this.playing=false;this.level=0;}
           else this.following=next;
         }
       } else {this.last*=0.99;out[i]=this.last;}
@@ -250,60 +219,6 @@ registerProcessor('car-sound',CarSound);
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
-  let careChallenge='', careLinked=false, careTimer=0;
-  const validCareUrl=link=>/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(link);
-  const fromCareFrame=source=>{
-    try{
-      for(let depth=0;source&&depth<5;depth++){
-        if(source===$('careFrame').contentWindow)return true;
-        if(source===source.parent)return false;
-        source=source.parent;
-      }
-    }catch(error){}
-    return false;
-  };
-  window.addEventListener('message',event=>{
-    if(window.top!==window || !careChallenge || event.data?.challenge!==careChallenge ||
-       !/^https:\/\/(?:script\.google\.com|(?:[a-z0-9-]+-)?script\.googleusercontent\.com)$/i.test(event.origin) ||
-       !fromCareFrame(event.source))return;
-    if(event.data.type==='care-ready'){
-      careLinked=true;clearTimeout(careTimer);
-      event.source.postMessage({type:'care-authorize',challenge:careChallenge},event.origin);
-      $('careStatus').textContent='';
-    }
-    if(careLinked && event.data.type==='care-size' && Number.isFinite(event.data.height))
-      $('careFrame').style.height=Math.max(260,Math.min(1400,Math.ceil(event.data.height)+4))+'px';
-  });
-  function connectCare(){
-    const link=$('careUrl').value.trim();
-    if(!validCareUrl(link)){
-      $('careStatus').textContent='Dán link /exec của dự án Lịch chăm sóc.';
-      return;
-    }
-    try{localStorage.setItem('care-webapp',link);}catch{}
-    $('careOpen').hidden=false;$('careSettings').open=false;
-    if(!window.isSecureContext || window.top!==window){
-      $('careStatus').textContent='Mở dashboard bằng HTTPS hoặc mở lịch trong tab riêng.';
-      return;
-    }
-    careChallenge=Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
-    careLinked=false;clearTimeout(careTimer);
-    $('careFrame').hidden=false;
-    $('careFrame').src=link+'?embed=1&challenge='+careChallenge;
-    $('careStatus').textContent='Đang kết nối lịch…';
-    careTimer=setTimeout(()=>{
-      if(!careLinked)$('careStatus').textContent='Lịch chưa mở được trong dashboard. Kiểm tra CARE_DASHBOARD_ORIGIN hoặc mở lịch trong tab riêng.';
-    },12000);
-  }
-  $('careConnect').onclick=connectCare;
-  $('careOpen').onclick=()=>{
-    const link=$('careUrl').value.trim();
-    if(validCareUrl(link))window.open(link,'_blank','noopener,noreferrer');
-  };
-  $('careOrigin').textContent=location.origin;
-  try{$('careUrl').value=localStorage.getItem('care-webapp')||'';}catch{}
-  if(validCareUrl($('careUrl').value.trim()))connectCare();
-  else $('careSettings').open=true;
   let client = null;
   let topicBase = '';
   let transport = 'none'; // direct | mqtt
@@ -363,23 +278,20 @@ registerProcessor('car-sound',CarSound);
     try{localStorage.setItem(journalPrefix+journalTopic,JSON.stringify(journal));}catch{}
     renderJournal();
   }
-  const guardLabels={on:'Đang canh gác · Sẵn sàng',off:'Đã tắt canh gác',waiting:'Chờ PIR ổn định',
-    ready:'Chờ PIR về LOW',high:'Đã phát hiện chuyển động',held:'PIR giữ HIGH hơn 2 phút',
-    quiet:'Chờ khu vực yên để canh gác lại',pending:'Đang chờ lượt gửi'};
   function observeCamera(state,last,mail){
     selectJournal();
     cameraSeenAt=Date.now();
     if(observedGuard!==null && observedGuard!==state){
-      recordEvent('Canh gác · '+(guardLabels[state]||state));
+      recordEvent('Camera xác nhận trạng thái canh gác: '+({on:'đang bật',off:'đã tắt',waiting:'đang chờ PIR ổn định'}[state]||state));
     }
     const sent=Number(last);
     if(Number.isFinite(sent) && sent>0 && observedSent!==sent){
-      recordEvent('Máy chủ xác nhận ảnh canh gác lúc '+new Date(sent*1000).toLocaleString('vi-VN'));
+      recordEvent('Camera báo gửi email thành công lúc '+new Date(sent*1000).toLocaleString('vi-VN'));
     }
     if(mail==='3' && observedMail!=='3')recordEvent('Camera báo lỗi gửi email.');
     observedGuard=state; observedMail=mail; observedSent=sent;
-    $('iotMail').textContent=mail==='1'?'Ảnh canh gác · đang gửi':mail==='3'?'Ảnh canh gác · lần gửi gần nhất lỗi':
-      sent>0?'Ảnh canh gác · máy chủ nhận lúc '+new Date(sent*1000).toLocaleString('vi-VN'):'Ảnh canh gác · máy chủ chưa xác nhận ảnh';
+    $('iotMail').textContent=mail==='1'?'Ảnh chuyển động · đang gửi email':mail==='3'?'Ảnh chuyển động · lỗi gửi email':
+      sent>0?'Ảnh chuyển động · camera báo gửi lúc '+new Date(sent*1000).toLocaleString('vi-VN'):'Ảnh chuyển động · chưa có lần gửi thành công';
   }
   function downloadBlob(blob,name){
     const url=URL.createObjectURL(blob);
@@ -412,14 +324,13 @@ registerProcessor('car-sound',CarSound);
     }
     observedVehicleOnline=vehicleOnline;
     $('iotVehicle').textContent=vehicleSeenAt?'Xe — dữ liệu gần nhất '+Math.floor((Date.now()-vehicleSeenAt)/1000)+' giây trước'+(vehicleOnline?'':' · chưa xác nhận online'):'Xe — chưa nhận dữ liệu';
-    const age=Date.now()-cameraSeenAt;
-    $('iotCamera').textContent=cameraSeenAt?(age<=40000?'Camera · phản hồi ':'Camera · chưa có phản hồi mới trong ')+Math.floor(age/1000)+' giây':'Camera · bấm Kiểm tra camera để kết nối';
+    $('iotCamera').textContent=cameraSeenAt?'Camera — phản hồi gần nhất '+Math.floor((Date.now()-cameraSeenAt)/1000)+' giây trước':'Camera — chưa xác nhận kết nối';
   },1000);
   setInterval(async()=>{
-    if(document.hidden || camOn || cameraPollBusy || pending.size || $('testGuardPhoto').disabled || !key || !client?.connected)return;
+    if(document.hidden || camOn || cameraPollBusy || !key || !client?.connected)return;
     cameraPollBusy=true;
     try{await requestCamera('status');}catch{}finally{cameraPollBusy=false;}
-  },5000);
+  },30000);
 
   function logMsg(msg) {
     const box = $('logConsole');
@@ -743,7 +654,7 @@ registerProcessor('car-sound',CarSound);
   const pending=new Map(), encoder=new TextEncoder(), decoder=new TextDecoder();
   const cameraBase=()=>topicBase+'/cam-v1';
   const hex=bytes=>Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
-  let serverClockOffset=0, clockCheckedAt=0, lastCameraStamp=0;
+  let serverClockOffset=0, clockCheckedAt=0;
   let encryptedReplies=0;
   async function syncCameraClock(){
     if(clockCheckedAt && performance.now()-clockCheckedAt<60000)return;
@@ -761,9 +672,7 @@ registerProcessor('car-sound',CarSound);
       clockCheckedAt=performance.now();
       logMsg('Đã đồng bộ giờ camera. Độ lệch đồng hồ '+Math.round(serverClockOffset/1000)+' giây.');
     }catch(error){
-      serverClockOffset=0;
-      clockCheckedAt=0;
-      logMsg('Không đọc được giờ máy chủ, thử giờ tự động của điện thoại.');
+      throw Error('Không đồng bộ được giờ. Bật ngày giờ tự động trên điện thoại rồi tải lại trang.');
     }finally{clearTimeout(timeout);}
   }
   async function unlock(){
@@ -774,11 +683,10 @@ registerProcessor('car-sound',CarSound);
       const box=document.createElement('dialog');
       box.innerHTML='<form method="dialog"><label>Mật khẩu camera <input type="password" autocomplete="off" autocapitalize="none" spellcheck="false"></label><button value="ok">Xác nhận</button><button value="cancel">Hủy</button></form>';
       document.body.appendChild(box);
-      box.addEventListener('close',()=>{const value=box.returnValue==='ok'?box.querySelector('input').value:null;box.remove();resolve(value);},{once:true});
+      box.addEventListener('close',()=>{const value=box.returnValue==='ok'?box.querySelector('input').value:'';box.remove();resolve(value);},{once:true});
       box.showModal(); box.querySelector('input').focus();
     });
-    if (input===null) throw Error('Đã hủy nhập mật khẩu camera.');
-    if (input.length < 8) throw Error('Nhập CAMERA_PASSWORD trong sketch ESP32-CAM đã nạp (ít nhất 8 ký tự). Mã GUARD_PIN sẽ được hỏi ở bước tiếp theo.');
+    if (input.length < 8) throw Error('Mật khẩu camera cần ít nhất 8 ký tự.');
     const keyBytes = /^[a-f0-9]{64}$/i.test(input)
       ? Uint8Array.from(input.match(/../g), value => parseInt(value, 16))
       : new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(input)));
@@ -788,9 +696,7 @@ registerProcessor('car-sound',CarSound);
     if(!client?.connected || !key)throw Error('Camera chưa kết nối.');
     const id=hex(crypto.getRandomValues(new Uint8Array(16)));
     const iv=crypto.getRandomValues(new Uint8Array(12));
-    const stamp=Math.max(Math.round(Date.now()+serverClockOffset),lastCameraStamp+1);
-    lastCameraStamp=stamp;
-    const body=encoder.encode([id,stamp,op,arg].join('\n'));
+    const body=encoder.encode([id,Math.round(Date.now()+serverClockOffset),op,arg].join('\n'));
     const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:encoder.encode('request')},key,body);
     const packet=new Uint8Array(12+cipher.byteLength);
     packet.set(iv);packet.set(new Uint8Array(cipher),12);
@@ -798,8 +704,8 @@ registerProcessor('car-sound',CarSound);
     return new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>{pending.delete(id);reject(Error(encryptedReplies>repliesBefore
         ? 'Đã nhận gói camera nhưng chưa đọc được phản hồi của yêu cầu này. Bấm Đổi mật khẩu và nhập lại đúng mật khẩu trên laptop.'
-        : 'Camera không trả lời. Kiểm tra nguồn, Wi-Fi camera, topic và giờ tự động trên điện thoại.'));},3500);
-      pending.set(id,{finish(data){if(onFrame && Number.isInteger(data.frame)){onFrame(data); if(op==='burst' && data.result==='ok' && data.frame<5)return;}clearTimeout(timer);pending.delete(id);resolve(data);}});
+        : 'Không nhận gói camera. Topic đang dùng: '+cameraBase()+'. So sánh với laptop và đóng camera trên laptop trước khi thử lại.'));},3500);
+      pending.set(id,{finish(data){if(onFrame && Number.isInteger(data.frame)){onFrame(data); if(data.result==='ok' && data.frame<5)return;}clearTimeout(timer);pending.delete(id);resolve(data);}});
       if(client.connected)client.publish(cameraBase()+'/request',packet,{qos:0,retain:false});
     });
   }
@@ -809,31 +715,13 @@ registerProcessor('car-sound',CarSound);
     try{
       const bytes=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:raw.subarray(0,12),additionalData:encoder.encode('reply')},key,raw.subarray(12)));
       const split=bytes.indexOf(10);if(split<0 || split>127)return;
-      const [id,result,state,last,mail,index,captureOffset,fault,pir,episodes,source,quiet,httpCode]=decoder.decode(bytes.subarray(0,split)).split('|');
+      const [id,result,state,last,mail,index,captureOffset]=decoder.decode(bytes.subarray(0,split)).split('|');
       if(!pending.has(id))return;
       observeCamera(state,last,mail);
-      const reason={wifi:mail==='1'?'Đã chụp ảnh · Chờ Wi-Fi':'Hết thời gian chờ Wi-Fi để gửi ảnh',
-        clock:mail==='1'?'Đã chụp ảnh · Chờ đồng bộ giờ':'Hết thời gian chờ đồng bộ giờ',
-        capture:'Camera chưa lấy được ảnh',memory:'Camera thiếu bộ nhớ để gửi ảnh',busy:'Hàng chờ gửi ảnh đang đầy',
-        deploy:'Kiểm tra URL /exec và quyền truy cập của ứng dụng web Canh gác',
-        denied:'TOKEN của dự án gửi ảnh chưa khớp',http:'Lỗi HTTPS hoặc Apps Script gửi ảnh',invalid:'Apps Script từ chối ảnh',
-        drive:'Lỗi khi lưu ảnh vào thư mục Drive',saved:'Đã lưu Drive, Apps Script báo Gmail chưa gửi được',
-        emailed:'Apps Script xác nhận đã gửi Gmail',legacy:'Máy chủ nhận ảnh, bản Apps Script cũ chưa xác nhận kết quả Gmail',
-        hardware:'Camera hoặc tác vụ PIR chưa khởi động'}[fault]||'';
-      let stateLabel=guardLabels[state]||'Chưa đọc được trạng thái PIR';
-      if(Number(quiet)>0){
-        if(state==='ready')stateLabel='Chờ yên thêm '+Number(quiet)+' giây để bắt đầu canh gác';
-        if(state==='quiet')stateLabel='Chờ yên thêm '+Number(quiet)+' giây để canh gác lại';
-      }
-      const httpDetail=(fault==='http'||fault==='deploy')&&Number(httpCode)?' (HTTP '+Number(httpCode)+')':'';
-      const attempt=source==='P'?'PIR tự động':source==='T'?'Ảnh thử':'Ảnh canh gác';
-      const status=mail==='1'?(fault==='wifi'||fault==='clock'?reason:'Đang chụp và gửi ảnh'):
-        reason||(mail==='3'?'Lần gửi gần nhất lỗi':mail==='2'?'Máy chủ đã nhận ảnh':'');
-      $('guardStatus').textContent=stateLabel+(status?' · '+(mail==='1'?'':attempt+' · ')+status+httpDetail:'');
-      $('pirDiagnostic').textContent=pir==='0'||pir==='1'?'GPIO13: '+(pir==='1'?'HIGH':'LOW')+
-        ' · '+episodes+' đợt từ lúc khởi động'+(Number(last)?' · Ảnh gần nhất '+new Date(Number(last)*1000).toLocaleString('vi-VN'):''):'';
-      if(reason)$('iotMail').textContent='Ảnh canh gác · '+reason+httpDetail;
-      pending.get(id).finish({result,mail,fault,source,frame:index===undefined?null:Number(index),captureOffset:Math.max(0,Number(captureOffset)||0),jpeg:bytes.subarray(split+1)});
+      $('guardStatus').textContent=({on:'Đang canh gác',off:'Đã tắt canh gác',waiting:'Chờ PIR ổn định'}[state]||'')+
+        (Number(last)?' · Gửi ảnh gần nhất '+new Date(Number(last)*1000).toLocaleString('vi-VN'):'')+
+        (mail==='3'?' · Lần gửi gần nhất lỗi':mail==='1'?' · Đang gửi ảnh':'');
+      pending.get(id).finish({result,frame:index===undefined?null:Number(index),captureOffset:Math.max(0,Number(captureOffset)||0),jpeg:bytes.subarray(split+1)});
     }catch{/* Only authenticated replies can complete a request. */}
   }
   async function guard(mode){
@@ -842,38 +730,13 @@ registerProcessor('car-sound',CarSound);
       const pin=prompt('Nhập mã canh gác GUARD_PIN (từ 4 ký tự)');if(!pin)return;
       const d=await requestCamera(mode,pin);
       if(d.result==='ok')recordEvent(mode==='arm'?'Camera đã nhận lệnh bật canh gác.':'Camera đã nhận lệnh tắt canh gác.');
-      $('guardReply').textContent=({ok:'Camera đã xác nhận.',pin:'Mã canh gác chưa đúng.',
-        unavailable:'Camera chưa khởi động tác vụ canh gác.'}[d.result]||'Camera chưa xác nhận lệnh.');
+      $('guardReply').textContent=d.result==='ok'?'Camera đã xác nhận.':'Kiểm tra lại GUARD_PIN.';
     }catch(e){$('guardReply').textContent=e.message;}
   }
   $('armEmail').onclick=()=>guard('arm');$('disarmEmail').onclick=()=>guard('off');
   $('camCheck').onclick=async()=>{
     try{await unlock();await requestCamera('status');$('camDiagnostic').textContent='Camera đã trả lời.';}
     catch(e){$('camDiagnostic').textContent=e.message;}
-  };
-  $('testGuardPhoto').onclick=async()=>{
-    const button=$('testGuardPhoto');button.disabled=true;
-    try{
-      await unlock();
-      const pin=prompt('Nhập mã canh gác GUARD_PIN để gửi 1 ảnh thử.');if(!pin)return;
-      const test=await requestCamera('test',pin);
-      if(test.result!=='queued'){
-        $('guardReply').textContent=({pin:'Mã canh gác chưa đúng.',busy:'Camera đang có ảnh khác chờ gửi.',off:'Bật canh gác trước khi gửi ảnh thử.',unavailable:'Camera chưa khởi động tác vụ canh gác.'}[test.result]||'Cần firmware camera hỗ trợ gửi ảnh thử.');
-        return;
-      }
-      $('guardReply').textContent='Đã yêu cầu gửi 1 ảnh. Đang chờ máy chủ…';
-      for(let attempt=0;attempt<12;attempt++){
-        await new Promise(resolve=>setTimeout(resolve,2500));
-        const state=await requestCamera('status');
-        if((state.mail==='2'||state.mail==='3') && (!state.source||state.source==='T')){
-          $('guardReply').textContent=state.fault==='emailed'?'Apps Script xác nhận đã gửi Gmail ảnh thử.':
-            state.mail==='2'?'Máy chủ đã nhận ảnh thử. Xem trạng thái xác nhận Gmail.':'Xem lỗi gửi ảnh thử ở dòng trạng thái.';
-          return;
-        }
-      }
-      $('guardReply').textContent='Camera vẫn đang chờ. Bấm Kiểm tra camera để xem trạng thái mới.';
-    }catch(error){$('guardReply').textContent=error.message;}
-    finally{button.disabled=false;}
   };
   $('forgetKey').onclick=()=>{toggleCamera(false);key=null;$('camDiagnostic').textContent='Đã xóa mật khẩu khỏi tab này.';};
   // Each decision uses a completed burst, including browser decode and displayed-frame age.
@@ -910,7 +773,7 @@ registerProcessor('car-sound',CarSound);
     $('camToggle').textContent=enable?'TẮT CAMERA':'BẬT CAMERA';
     $('camImage').hidden=true;$('camPlaceholder').hidden=false;
     $('camImage').removeAttribute('src');if(imageUrl)URL.revokeObjectURL(imageUrl);imageUrl='';
-    $('camStatus').textContent=enable?'Đang chờ ảnh…':'Đang tắt xem trực tiếp.';
+    $('camStatus').textContent=enable?'Đang chờ ảnh…':'Camera tắt.';
     let batch=0, highestReceived=0;
     const estimator=adaptiveCamera();
     let decoding = false, waiting = null;
@@ -953,15 +816,13 @@ registerProcessor('car-sound',CarSound);
     }
     async function getBatch(){
       while(active()){
-        const audioBusy=!!audioSession;
-        const busy=audioBusy || activeDriveCommand!==null;
+        const busy=!!audioSession || activeDriveCommand!==null;
         const auto=$('remoteSize').value==='auto';
-        const selected=auto?estimator.width(busy):Number($('remoteSize').value);
-        const requested=audioBusy?Math.min(selected,320):selected;
+        const requested=auto?estimator.width(busy):Number($('remoteSize').value);
         const started=Date.now(),base=++batch*6,stats={shown:0,maxAge:0};
         let failed=false;
         try{
-          const reply=await requestCamera(audioBusy?'frame':'burst',String(requested),data=>{
+          const reply=await requestCamera('burst',String(requested),data=>{
             const order=base+data.frame;
             if(!active()||order<=highestReceived||!data.jpeg.length||data.result!=='ok')return;
             highestReceived=order;
@@ -976,8 +837,7 @@ registerProcessor('car-sound',CarSound);
           if(active())$('camStatus').textContent=error.message;
         }
         if(!active())return;
-        if(auto&&!audioBusy)estimator.report(requested,Date.now()-started,stats.shown,stats.maxAge,failed,Date.now(),busy);
-        if(audioBusy&&!failed)await new Promise(resolve=>setTimeout(resolve,150));
+        if(auto)estimator.report(requested,Date.now()-started,stats.shown,stats.maxAge,failed,Date.now(),busy);
         if(failed)await new Promise(resolve=>setTimeout(resolve,300));
       }
     }
@@ -1186,21 +1046,12 @@ registerProcessor('car-sound',CarSound);
         if (audioSession!==s) {s.stream.getTracks().forEach(t=>t.stop());return;}
         const source=s.ctx.createMediaStreamSource(s.stream);
         const highpass=s.ctx.createBiquadFilter();
-        highpass.type='highpass';highpass.frequency.value=90;
-        const lowpass=s.ctx.createBiquadFilter();
-        lowpass.type='lowpass';lowpass.frequency.value=5900;
+        highpass.type='highpass';highpass.frequency.value=110;
         const node=s.node;
         const silent=s.ctx.createGain();silent.gain.value=0;
-        let voice=source.connect(highpass).connect(lowpass);
-        if(s.ctx.createDynamicsCompressor){
-          const compressor=s.ctx.createDynamicsCompressor();
-          compressor.threshold.value=-19;compressor.knee.value=16;compressor.ratio.value=3;
-          compressor.attack.value=0.004;compressor.release.value=0.16;
-          voice=voice.connect(compressor);
-        }
-        voice.connect(node).connect(silent).connect(s.ctx.destination);
+        source.connect(highpass).connect(node).connect(silent).connect(s.ctx.destination);
         node.port.onmessage=({data})=>{
-          if (audioSession!==s || !s.started || s.sending || s.releasing) return;
+          if (audioSession!==s || !s.started || s.sending) return;
           s.sending=true;
           const pcm=new Int16Array(data), gain=Number($('speakerLevel').value)/100;
           for(let i=0;i<pcm.length;i++) {
@@ -1226,17 +1077,10 @@ registerProcessor('car-sound',CarSound);
       return audioSession===s?s:null;
     } catch(e) {if(audioSession===s)stopAudio('Lỗi âm thanh: '+e.message);}
   }
-  async function receiveAudio(payload) {
-    const s=audioSession;
-    if(!s?.key || payload.length<49 || payload.length>1073)return;
-    s.rxQueue??=[];
-    if(s.rxQueue.length>=8)s.rxQueue.shift();
-    s.rxQueue.push(payload);
-    if(s.rxBusy)return;
-    s.rxBusy=true;
-    try{
-      while(audioSession===s && s.rxQueue.length)await receiveAudioFrame(s.rxQueue.shift());
-    }finally{s.rxBusy=false;}
+  let audioReceiveChain=Promise.resolve();
+  function receiveAudio(payload) {
+    const active=audioSession;
+    audioReceiveChain=audioReceiveChain.then(()=>{if(audioSession===active)return receiveAudioFrame(payload);}).catch(()=>{});
   }
   async function receiveAudioFrame(payload) {
     const s=audioSession;
@@ -1284,7 +1128,7 @@ registerProcessor('car-sound',CarSound);
     }
     let sample=0, sentSamples=0, failed=false;
     const channel=decoded.getChannelData(0),gain=Number($('speakerLevel').value)/100;
-    const paddedLength=Math.max(length,1536);
+    const paddedLength=Math.max(length,1024);
     while(audioSession===s && sentSamples<paddedLength && s.client.connected) {
       const pcm=new Int16Array(512);
       for(let i=0;i<512 && sample<length;i++,sample++) {
@@ -1297,7 +1141,7 @@ registerProcessor('car-sound',CarSound);
         const limited=peak<=0.8?peak:0.8+0.2*Math.tanh((peak-0.8)/0.2);
         pcm[i]=Math.round(Math.sign(value)*limited*32767);
       }
-      // Pad short files for initial receiver prefill.
+      // Two packets let the receiver start even for a very short sound.
       try {await audioSend(s,'V',pcm.buffer);sentSamples+=pcm.length;}
       catch(_){failed=true;break;}
       if(audioSession!==s)break;
@@ -1326,17 +1170,9 @@ registerProcessor('car-sound',CarSound);
     if(!talkHeld)return;
     talkHeld=false;
     const intent=++audioIntent, resume=resumeListen;resumeListen=false;
-    const talking=audioSession;
-    if(talking?.mode==='T'){
-      if(talking.started && !talking.playback){
-        talking.releasing=true;
-        talking.stream?.getTracks().forEach(track=>track.stop());
-        await new Promise(resolve=>setTimeout(resolve,240));
-      }
-      if(audioSession===talking)await stopAudio();
-    }
+    if(audioSession?.mode==='T')await stopAudio();
     if(resume){
-      await new Promise(resolve=>setTimeout(resolve,70));
+      await new Promise(resolve=>setTimeout(resolve,220));
       if(intent===audioIntent && !document.hidden && !audioSession && client?.connected)void beginAudio('L',false,true);
     }
   }
@@ -1418,7 +1254,7 @@ registerProcessor('car-sound',CarSound);
     logMsg('Đang dùng Direct IP cùng nguồn: ' + window.location.origin + '.');
   } else {
     setBadge('CHƯA KẾT NỐI', false);
-    logMsg('Nhập topicBase của xe rồi bấm KẾT NỐI / KIỂM TRA để dùng MQTT.');
+    logMsg('Dashboard v1.9 Camera tương thích firmware 1.13.1-front8-av. Nhập topicBase của xe rồi bấm KẾT NỐI / KIỂM TRA để dùng MQTT.');
   }
 })();
 </script>
