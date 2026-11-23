@@ -774,11 +774,10 @@ registerProcessor('car-sound',CarSound);
       const box=document.createElement('dialog');
       box.innerHTML='<form method="dialog"><label>Mật khẩu camera <input type="password" autocomplete="off" autocapitalize="none" spellcheck="false"></label><button value="ok">Xác nhận</button><button value="cancel">Hủy</button></form>';
       document.body.appendChild(box);
-      box.addEventListener('close',()=>{const value=box.returnValue==='ok'?box.querySelector('input').value:null;box.remove();resolve(value);},{once:true});
+      box.addEventListener('close',()=>{const value=box.returnValue==='ok'?box.querySelector('input').value:'';box.remove();resolve(value);},{once:true});
       box.showModal(); box.querySelector('input').focus();
     });
-    if (input===null) throw Error('Đã hủy nhập mật khẩu camera.');
-    if (input.length < 8) throw Error('Nhập CAMERA_PASSWORD trong sketch ESP32-CAM đã nạp (ít nhất 8 ký tự). Mã GUARD_PIN sẽ được hỏi ở bước tiếp theo.');
+    if (input.length < 8) throw Error('Mật khẩu camera cần ít nhất 8 ký tự.');
     const keyBytes = /^[a-f0-9]{64}$/i.test(input)
       ? Uint8Array.from(input.match(/../g), value => parseInt(value, 16))
       : new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(input)));
